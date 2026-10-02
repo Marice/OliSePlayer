@@ -6,6 +6,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-10-02
+
+Sneak preview build.
+
 ### Added
 - PS5 homebrew tracker player built with the ps5-payload-dev SDK, SDL2 and
   libxmp-lite (MOD, XM, S3M, IT).
