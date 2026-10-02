@@ -1,14 +1,9 @@
-/* Random tracker module downloader for OliSe Player.
+/* The Mod Archive fetcher for OliSe Player.
  *
  * Uses the PS5 system HTTP client (libSceHttp2) the same way the
- * ps5-payload-sdk http2_get sample does. Both Mod Archive endpoints work
- * over plain HTTP, so no TLS is involved:
- *   1. http://modarchive.org/index.php?request=view_random&format=<FMT>
- *      -> HTML page containing downloads.php?moduleid=NNN#name.ext
- *   2. http://api.modarchive.org/downloads.php?moduleid=NNN
- *      -> the module bytes
- * The format is picked at random from what libxmp-lite plays (MOD, XM,
- * S3M, IT). The caller validates the bytes with xmp_test_module_from_memory.
+ * ps5-payload-sdk http2_get sample does. All endpoints work over plain
+ * HTTP, so no TLS is involved. Pages are parsed with plain string scanning;
+ * only the download link, the pagination links and a few labels are used.
  */
 #include "netxm.h"
 
@@ -18,13 +13,17 @@
 
 #ifdef OLISE_NET
 
-#define RANDOM_URL   "http://modarchive.org/index.php?request=view_random&format=%s"
-#define DOWNLOAD_URL "http://api.modarchive.org/downloads.php?moduleid=%ld"
+#define URL_RANDOM   "http://modarchive.org/index.php?request=view_random"
+#define URL_GENRE    "http://modarchive.org/index.php?request=search&search_type=genre&query=%d"
+#define URL_CHART    "http://modarchive.org/index.php?request=view_chart&query=%s"
+#define URL_DOWNLOAD "http://api.modarchive.org/downloads.php?moduleid=%ld"
 #define USER_AGENT   "OliSePlayer/1.0 (PS5 homebrew)"
 #define PAGE_CAP     (2u * 1024u * 1024u)
 #define MODULE_CAP   (16u * 1024u * 1024u)
+#define MAX_ENTRIES  64
 
-static const char* const formats[] = { "MOD", "XM", "S3M", "IT" };
+static const char* const SUPPORTED[] = { "MOD", "XM", "S3M", "IT" };
+#define NUM_SUPPORTED 4
 
 /* Prototypes of the Sony libraries; the SDK ships no headers for them. */
 int sceNetInit(void);
@@ -40,7 +39,8 @@ int sceHttp2ReadData(int, void*, size_t);
 
 static int g_tmpl = -1;
 
-/* One-time library setup, kept for the lifetime of the process. */
+/* ------------------------------------------------------------- network */
+
 static int net_init(void)
 {
 	int pool, ssl, http;
@@ -128,7 +128,9 @@ done:
 	return rc;
 }
 
-/* Decode %XX and '+' in place; the fragment is a file name. */
+/* -------------------------------------------------------------- parsing */
+
+/* Decode %XX and '+' in place (file names in URL fragments). */
 static void url_decode(char* s)
 {
 	char* d = s;
@@ -147,79 +149,331 @@ static void url_decode(char* s)
 	*d = 0;
 }
 
-/* Find "downloads.php?moduleid=NNN#name.xm" in the random page. */
-static int parse_random_page(const char* html, long* module_id, char* title, size_t title_len)
+/* Decode the handful of HTML entities the site uses in titles. */
+static void html_decode(char* s)
 {
-	const char* p = strstr(html, "downloads.php?moduleid=");
-	const char* frag;
-	size_t n;
-
-	if (!p) return -1;
-	p += strlen("downloads.php?moduleid=");
-	*module_id = strtol(p, (char**)&frag, 10);
-	if (*module_id <= 0) return -1;
-
-	title[0] = 0;
-	if (*frag == '#') {
-		frag++;
-		n = strcspn(frag, "\"'<> ");
-		if (n >= title_len) n = title_len - 1;
-		memcpy(title, frag, n);
-		title[n] = 0;
-		url_decode(title);
-		/* Drop the extension for display; libxmp reports the format. */
-		n = strlen(title);
-		while (n > 0 && title[n - 1] != '.') n--;
-		if (n > 1) title[n - 1] = 0;
+	static const struct { const char* ent; char ch; } tab[] = {
+		{ "&amp;", '&' }, { "&quot;", '"' }, { "&#039;", '\'' }, { "&#39;", '\'' },
+		{ "&lt;", '<' }, { "&gt;", '>' }, { "&nbsp;", ' ' },
+	};
+	char* d = s;
+	while (*s) {
+		if (*s == '&') {
+			size_t i;
+			int hit = 0;
+			for (i = 0; i < sizeof(tab) / sizeof(tab[0]); i++) {
+				size_t n = strlen(tab[i].ent);
+				if (strncmp(s, tab[i].ent, n) == 0) {
+					*d++ = tab[i].ch;
+					s += n;
+					hit = 1;
+					break;
+				}
+			}
+			if (hit) continue;
+		}
+		*d++ = *s++;
 	}
-	if (!title[0]) snprintf(title, title_len, "MODULE %ld", *module_id);
+	*d = 0;
+}
+
+static void trim(char* s)
+{
+	size_t n = strlen(s);
+	while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == '\t')) s[--n] = 0;
+	size_t i = 0;
+	while (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') i++;
+	if (i) memmove(s, s + i, n - i + 1);
+}
+
+/* Copy up to n chars of src that stop at any character in `stop`. */
+static void copy_until(char* dst, size_t dst_len, const char* src, const char* stop)
+{
+	size_t n = strcspn(src, stop);
+	if (n >= dst_len) n = dst_len - 1;
+	memcpy(dst, src, n);
+	dst[n] = 0;
+}
+
+/* Upper-case file extension without the dot, "" when none. */
+static void extension_of(const char* fname, char* out, size_t out_len)
+{
+	const char* dot = strrchr(fname, '.');
+	size_t i;
+	out[0] = 0;
+	if (!dot) return;
+	dot++;
+	for (i = 0; dot[i] && i + 1 < out_len; i++) {
+		char c = dot[i];
+		out[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+	}
+	out[i] = 0;
+}
+
+static int format_supported(const char* fmt)
+{
+	int i;
+	for (i = 0; i < NUM_SUPPORTED; i++) if (strcmp(fmt, SUPPORTED[i]) == 0) return 1;
 	return 0;
 }
 
-int netxm_fetch_random(uint8_t** data, size_t* len, char* title, size_t title_len, long* module_id_out)
+typedef struct {
+	long id;
+	char filename[96];
+	char title[96];
+	char format[8];
+} Entry;
+
+/* Collect "downloads.php?moduleid=NNN#file" links with their song title
+   (the title="" of the matching view_by_moduleid link that follows). */
+static int parse_entries(const char* html, Entry* out, int max, int supported_only)
+{
+	const char* p = html;
+	int n = 0;
+	while (n < max && (p = strstr(p, "downloads.php?moduleid=")) != NULL) {
+		Entry e;
+		char* end;
+		p += strlen("downloads.php?moduleid=");
+		memset(&e, 0, sizeof(e));
+		e.id = strtol(p, &end, 10);
+		if (e.id <= 0) { p = end; continue; }
+		if (*end == '#') copy_until(e.filename, sizeof(e.filename), end + 1, "\"'<> ");
+		url_decode(e.filename);
+		extension_of(e.filename, e.format, sizeof(e.format));
+		p = end;
+
+		/* Skip duplicates (the same module can appear twice per row). */
+		{
+			int dup = 0, i;
+			for (i = 0; i < n; i++) if (out[i].id == e.id) { dup = 1; break; }
+			if (dup) continue;
+		}
+		if (supported_only && !format_supported(e.format)) continue;
+
+		/* Song title: title="..." on the detail link for this id, if nearby. */
+		{
+			char needle[64];
+			const char* q;
+			snprintf(needle, sizeof(needle), "view_by_moduleid&amp;query=%ld\"", e.id);
+			q = strstr(p, needle);
+			if (q && (size_t)(q - p) < 2000) {
+				q = strstr(q, "title=\"");
+				if (q) {
+					copy_until(e.title, sizeof(e.title), q + 7, "\"");
+					html_decode(e.title);
+					trim(e.title);
+				}
+			}
+		}
+		if (!e.title[0]) {
+			strncpy(e.title, e.filename, sizeof(e.title) - 1);
+			char* dot = strrchr(e.title, '.');
+			if (dot && dot != e.title) *dot = 0;
+		}
+		out[n++] = e;
+	}
+	return n;
+}
+
+/* Highest N in "page=N#mods" pagination links; 1 when there is none. */
+static int parse_max_page(const char* html)
+{
+	const char* p = html;
+	int best = 1;
+	while ((p = strstr(p, "page=")) != NULL) {
+		char* end;
+		long v = strtol(p + 5, &end, 10);
+		if (v > best && strncmp(end, "#mods", 5) == 0) best = (int)v;
+		p = end;
+	}
+	return best;
+}
+
+/* Text after a label such as "Genre:", skipping tags and entities. */
+static void parse_label(const char* html, const char* label, char* out, size_t out_len)
+{
+	const char* p = strstr(html, label);
+	out[0] = 0;
+	if (!p) return;
+	p += strlen(label);
+	for (;;) {
+		while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
+		if (strncmp(p, "&nbsp;", 6) == 0) { p += 6; continue; }
+		if (*p == '<') {
+			const char* gt = strchr(p, '>');
+			if (!gt) return;
+			p = gt + 1;
+			continue;
+		}
+		break;
+	}
+	copy_until(out, out_len, p, "<\n\r");
+	html_decode(out);
+	trim(out);
+}
+
+/* --------------------------------------------------------------- fetch */
+
+/* Remember how many pages a genre (and format) listing has. */
+typedef struct { int genre_id; int fmt; int pages; } PageCache;
+static PageCache g_pages[64];
+static int g_pages_n = 0;
+
+static int cached_pages(int genre_id, int fmt)
+{
+	int i;
+	for (i = 0; i < g_pages_n; i++)
+		if (g_pages[i].genre_id == genre_id && g_pages[i].fmt == fmt) return g_pages[i].pages;
+	return 0;
+}
+
+static void cache_pages(int genre_id, int fmt, int pages)
+{
+	if (g_pages_n < (int)(sizeof(g_pages) / sizeof(g_pages[0]))) {
+		g_pages[g_pages_n].genre_id = genre_id;
+		g_pages[g_pages_n].fmt = fmt;
+		g_pages[g_pages_n].pages = pages;
+		g_pages_n++;
+	}
+}
+
+static int format_index(const char* fmt)
+{
+	int i;
+	if (!fmt) return -1;
+	for (i = 0; i < NUM_SUPPORTED; i++) if (strcmp(fmt, SUPPORTED[i]) == 0) return i;
+	return -1;
+}
+
+static int download(long module_id, NetxmResult* out)
+{
+	char url[160];
+	snprintf(url, sizeof(url), URL_DOWNLOAD, module_id);
+	fprintf(stderr, "netxm: downloading %s (%s)\n", url, out->title);
+	if (http_get(url, &out->data, &out->len, MODULE_CAP) != 0) return -4;
+	if (out->len < 64) {
+		fprintf(stderr, "netxm: module %ld is too small (%zu bytes)\n", module_id, out->len);
+		free(out->data);
+		out->data = NULL;
+		out->len = 0;
+		return -5;
+	}
+	out->module_id = module_id;
+	return 0;
+}
+
+static void use_entry(NetxmResult* out, const Entry* e)
+{
+	strncpy(out->title, e->title, sizeof(out->title) - 1);
+	strncpy(out->filename, e->filename, sizeof(out->filename) - 1);
+	strncpy(out->format, e->format, sizeof(out->format) - 1);
+}
+
+static int fetch_random(const NetxmRequest* req, NetxmResult* out)
 {
 	uint8_t* page = NULL;
 	size_t page_len = 0;
-	long module_id = 0;
 	char url[160];
-	const char* fmt = formats[rand() % (sizeof(formats) / sizeof(formats[0]))];
+	Entry e[2];
+	const char* fmt = req->format ? req->format : SUPPORTED[rand() % NUM_SUPPORTED];
 
-	*data = NULL;
-	*len = 0;
-
-	if (net_init() != 0) return -1;
-
-	snprintf(url, sizeof(url), RANDOM_URL, fmt);
+	snprintf(url, sizeof(url), URL_RANDOM "&format=%s", fmt);
 	if (http_get(url, &page, &page_len, PAGE_CAP) != 0) return -2;
-	if (parse_random_page((const char*)page, &module_id, title, title_len) != 0) {
+	if (parse_entries((const char*)page, e, 1, 0) < 1) {
 		fprintf(stderr, "netxm: no module link in random page\n");
 		free(page);
 		return -3;
 	}
-	free(page);
-	if (module_id_out) *module_id_out = module_id;
-
-	snprintf(url, sizeof(url), DOWNLOAD_URL, module_id);
-	fprintf(stderr, "netxm: downloading %s (%s)\n", url, title);
-	if (http_get(url, data, len, MODULE_CAP) != 0) return -4;
-	if (*len < 64) {
-		fprintf(stderr, "netxm: module %ld is too small (%zu bytes)\n", module_id, *len);
-		free(*data);
-		*data = NULL;
-		*len = 0;
-		return -5;
+	use_entry(out, &e[0]);
+	/* The random page is a detail page: it also tells genre and artist. */
+	parse_label((const char*)page, "Genre:", out->genre, sizeof(out->genre));
+	parse_label((const char*)page, "Artist(s):", out->artist, sizeof(out->artist));
+	{
+		/* The <title> carries "song title - file.ext (FMT)"; prefer that name. */
+		const char* t = strstr((const char*)page, "modules - ");
+		if (t) {
+			char tmp[160];
+			copy_until(tmp, sizeof(tmp), t + 10, "<");
+			char* sep = strstr(tmp, " - ");
+			if (sep) { *sep = 0; html_decode(tmp); trim(tmp); if (tmp[0]) strncpy(out->title, tmp, sizeof(out->title) - 1); }
+		}
 	}
-	return 0;
+	free(page);
+	return download(e[0].id, out);
+}
+
+static int fetch_listing(const char* url_base, int genre_id, int fmt_idx, NetxmResult* out)
+{
+	uint8_t* page = NULL;
+	size_t page_len = 0;
+	char url[220];
+	Entry e[MAX_ENTRIES];
+	int n, pages, pick, rc;
+
+	pages = genre_id ? cached_pages(genre_id, fmt_idx) : 1;
+	if (pages <= 0) {
+		/* First visit: page 1 tells how many pages there are. */
+		snprintf(url, sizeof(url), "%s&page=1", url_base);
+		if (http_get(url, &page, &page_len, PAGE_CAP) != 0) return -2;
+		pages = parse_max_page((const char*)page);
+		cache_pages(genre_id, fmt_idx, pages);
+		pick = 1 + rand() % pages;
+		if (pick != 1) {
+			free(page);
+			page = NULL;
+		}
+	} else {
+		pick = 1 + rand() % pages;
+	}
+	if (!page) {
+		snprintf(url, sizeof(url), "%s&page=%d", url_base, pick);
+		if (http_get(url, &page, &page_len, PAGE_CAP) != 0) return -2;
+	}
+	n = parse_entries((const char*)page, e, MAX_ENTRIES, 1);
+	free(page);
+	if (n <= 0) {
+		fprintf(stderr, "netxm: no supported modules on %s (page %d of %d)\n", url_base, pick, pages);
+		return -3;
+	}
+	pick = rand() % n;
+	use_entry(out, &e[pick]);
+	rc = download(e[pick].id, out);
+	return rc;
+}
+
+int netxm_fetch(const NetxmRequest* req, NetxmResult* out)
+{
+	char url_base[200];
+	int fmt_idx;
+
+	memset(out, 0, sizeof(*out));
+	if (net_init() != 0) return -1;
+
+	switch (req->kind) {
+	case NETXM_RANDOM:
+		return fetch_random(req, out);
+	case NETXM_GENRE:
+		fmt_idx = format_index(req->format);
+		if (fmt_idx >= 0) snprintf(url_base, sizeof(url_base), URL_GENRE "&format=%s", req->genre_id, SUPPORTED[fmt_idx]);
+		else snprintf(url_base, sizeof(url_base), URL_GENRE, req->genre_id);
+		return fetch_listing(url_base, req->genre_id, fmt_idx, out);
+	case NETXM_FEATURED:
+		snprintf(url_base, sizeof(url_base), URL_CHART, "featured");
+		return fetch_listing(url_base, 0, -1, out);
+	case NETXM_TOPSCORE:
+		snprintf(url_base, sizeof(url_base), URL_CHART, "topscore");
+		return fetch_listing(url_base, 0, -1, out);
+	default:
+		return -6;
+	}
 }
 
 #else /* desktop build: no Sony network libraries */
 
-int netxm_fetch_random(uint8_t** data, size_t* len, char* title, size_t title_len, long* module_id)
+int netxm_fetch(const NetxmRequest* req, NetxmResult* out)
 {
-	if (module_id) *module_id = 0;
-	*data = NULL;
-	*len = 0;
-	if (title && title_len) title[0] = 0;
+	(void)req;
+	memset(out, 0, sizeof(*out));
 	fprintf(stderr, "netxm: network download not available in this build\n");
 	return -1;
 }

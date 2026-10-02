@@ -12,6 +12,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Mod Archive radio: R3 downloads a random module straight from
   modarchive.org, tracks play once and the next one starts automatically,
   L3 goes back through the history.
+- Stations (Triangle): random any format, random per format, featured
+  picks, top rated, and 78 genres from the Mod Archive genre list.
+- Genre and artist of a track shown in the info panel when the site
+  provides them.
 - Local `music/` folder next to `eboot.elf` with an FT2-style file list.
 - FastTracker II look: starfield, 3D chrome logo, live pattern view with
   the blue row bar, info panel, instrument list with VU meters, oscilloscope.

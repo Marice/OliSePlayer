@@ -26,34 +26,61 @@ bool Radio::available()
 #endif
 }
 
+void Radio::set_station(int index)
+{
+	if (index < 0) index = 0;
+	if (index >= station_count()) index = station_count() - 1;
+	station_ = index;
+}
+
 RadioState Radio::state() const
 {
 	return (RadioState)SDL_AtomicGet(const_cast<SDL_atomic_t*>(&state_));
 }
 
+static void clean_name(char* s)
+{
+	for (char* p = s; *p; p++) if ((unsigned char)*p < 32) *p = ' ';
+	size_t n = strlen(s);
+	while (n > 0 && s[n - 1] == ' ') s[--n] = 0;
+}
+
 int Radio::worker(void* arg)
 {
 	Radio* self = (Radio*)arg;
-	RadioTrack t;
-	int rc = netxm_fetch_random(&t.data, &t.len, t.title, sizeof(t.title), &t.module_id);
+	Station st = station_at(self->job_station_);
+	NetxmRequest req;
+	NetxmResult res;
+	req.kind = (int)st.kind;
+	req.genre_id = st.genre_id;
+	req.format = st.format;
+
+	int rc = netxm_fetch(&req, &res);
 	if (rc != 0) {
 		snprintf(self->error_, sizeof(self->error_), "DOWNLOAD FAILED (%d)", rc);
 		SDL_AtomicSet(&self->state_, (int)RadioState::Failed);
 		return 0;
 	}
 	char name[XMP_NAME_SIZE], type[XMP_NAME_SIZE];
-	if (!Player::test_memory(t.data, t.len, name, type)) {
-		snprintf(self->error_, sizeof(self->error_), "UNSUPPORTED MODULE #%ld", t.module_id);
-		free(t.data);
+	if (!Player::test_memory(res.data, res.len, name, type)) {
+		snprintf(self->error_, sizeof(self->error_), "UNSUPPORTED MODULE #%ld", res.module_id);
+		free(res.data);
 		SDL_AtomicSet(&self->state_, (int)RadioState::Failed);
 		return 0;
 	}
-	/* Prefer the title stored inside the module; fall back to the file name. */
-	for (char* p = name; *p; p++) if ((unsigned char)*p < 32) *p = ' ';
-	size_t n = strlen(name);
-	while (n > 0 && name[n - 1] == ' ') name[--n] = 0;
-	if (n > 0) strncpy(t.title, name, sizeof(t.title) - 1);
+	RadioTrack t;
+	t.data = res.data;
+	t.len = res.len;
+	t.module_id = res.module_id;
+	t.station = self->job_station_;
+	/* Prefer the title stored inside the module, then the site's title. */
+	clean_name(name);
+	strncpy(t.title, name[0] ? name : res.title, sizeof(t.title) - 1);
 	strncpy(t.type, type, sizeof(t.type) - 1);
+	strncpy(t.format, res.format, sizeof(t.format) - 1);
+	strncpy(t.genre, res.genre, sizeof(t.genre) - 1);
+	strncpy(t.artist, res.artist, sizeof(t.artist) - 1);
+	if (t.genre[0] == 0 && st.kind == STATION_GENRE) strncpy(t.genre, st.name, sizeof(t.genre) - 1);
 	self->pending_ = t;
 	SDL_AtomicSet(&self->state_, (int)RadioState::Ready);
 	return 0;
@@ -73,6 +100,7 @@ bool Radio::fetch()
 	}
 	free(pending_.data);
 	pending_ = RadioTrack();
+	job_station_ = station_;
 	SDL_AtomicSet(&state_, (int)RadioState::Loading);
 	thread_ = SDL_CreateThread(worker, "radio", this);
 	if (!thread_) {

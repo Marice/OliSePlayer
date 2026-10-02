@@ -7,3 +7,4 @@
 # local test modules
 /music/*
 !/music/README.txt
+/netxm_test

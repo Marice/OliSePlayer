@@ -15,6 +15,7 @@
 #include "library.h"
 #include "player.h"
 #include "radio.h"
+#include "stations.h"
 #include "ui.h"
 
 /* DualSense button indices as SDL reports them. */
@@ -60,6 +61,9 @@ struct App {
 	bool help = false;
 	bool browser = false;
 	int browser_sel = 0, browser_first = 0;
+	bool picker = false;
+	int picker_sel = 0, picker_first = 0;
+	char detail_text[64] = "";
 	int ch_offset = 0;
 	int card_frames = 0;           /* now-playing card countdown */
 	int toast_frames = 0;
@@ -101,6 +105,7 @@ static bool play_local(App& a, int index)
 	}
 	a.source = Source::Local;
 	snprintf(a.source_text, sizeof(a.source_text), "LOCAL %d/%d", index + 1, a.library.count());
+	snprintf(a.detail_text, sizeof(a.detail_text), "LOCAL FILE: %.40s", a.library.name(index));
 	on_track_started(a);
 	return true;
 }
@@ -113,6 +118,11 @@ static bool play_radio_track(App& a, const RadioTrack& t)
 	}
 	a.source = Source::Radio;
 	snprintf(a.source_text, sizeof(a.source_text), "MOD ARCHIVE #%ld", t.module_id);
+	if (t.genre[0] && t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s BY %s", t.module_id, t.genre, t.artist);
+	else if (t.genre[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s", t.module_id, t.genre);
+	else if (t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld BY %s", t.module_id, t.artist);
+	else snprintf(a.detail_text, sizeof(a.detail_text), "MOD ARCHIVE #%ld (%s)", t.module_id, t.format);
+	for (char* q = a.detail_text; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
 	on_track_started(a);
 	return true;
 }
@@ -177,8 +187,42 @@ static void poll_radio(App& a)
 	}
 }
 
+static void tune_in(App& a, int index)
+{
+	a.radio.set_station(index);
+	Station st = a.radio.station_info();
+	char name[48];
+	snprintf(name, sizeof(name), "%.40s", st.name);
+	for (char* q = name; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
+	show_toast(a, "TUNING IN", name);
+	a.radio_mode = true;
+	a.retry_frames = 0;
+	start_radio_fetch(a);
+}
+
 static void handle_button(App& a, int b, bool& running)
 {
+	if (a.picker) {
+		switch (b) {
+		case BTN_DUP:   if (a.picker_sel > 0) a.picker_sel--; break;
+		case BTN_DDOWN: if (a.picker_sel + 1 < station_count()) a.picker_sel++; break;
+		case BTN_L1:    a.picker_sel = a.picker_sel > 10 ? a.picker_sel - 10 : 0; break;
+		case BTN_R1:    a.picker_sel = a.picker_sel + 10 < station_count() ? a.picker_sel + 10 : station_count() - 1; break;
+		case BTN_CROSS:
+			tune_in(a, a.picker_sel);
+			a.picker = false;
+			break;
+		case BTN_CIRCLE:
+		case BTN_TRIANGLE:
+		case BTN_TOUCHPAD:
+			a.picker = false;
+			break;
+		}
+		int lines = 18;
+		if (a.picker_sel < a.picker_first) a.picker_first = a.picker_sel;
+		if (a.picker_sel >= a.picker_first + lines) a.picker_first = a.picker_sel - lines + 1;
+		return;
+	}
 	if (a.browser) {
 		switch (b) {
 		case BTN_DUP:   if (a.browser_sel > 0) a.browser_sel--; break;
@@ -211,7 +255,11 @@ static void handle_button(App& a, int b, bool& running)
 		break;
 	case BTN_L1:       if (a.library.count()) play_local(a, a.library.prev()); break;
 	case BTN_R1:       if (a.library.count()) play_local(a, a.library.next()); break;
-	case BTN_TRIANGLE: a.show_scopes = !a.show_scopes; break;
+	case BTN_TRIANGLE:
+		a.picker = true;
+		a.picker_sel = a.radio.station();
+		break;
+	case BTN_OPTIONS:  a.show_scopes = !a.show_scopes; break;
 	case BTN_SQUARE:   a.fx_level = (a.fx_level + 2) % 3; break;
 	case BTN_DLEFT:    if (a.ch_offset > 0) a.ch_offset--; break;
 	case BTN_DRIGHT:   a.ch_offset++; break;
@@ -223,7 +271,6 @@ static void handle_button(App& a, int b, bool& running)
 		if (a.l2_down) a.player.seek_positions(-1);
 		else a.player.set_volume(a.player.volume() - 5);
 		break;
-	case BTN_OPTIONS:  a.card_frames = 6 * FPS; break;
 	case BTN_TOUCHPAD: a.help = true; break;
 	default:
 		fprintf(stderr, "input: unmapped joystick button %d\n", b);
@@ -242,7 +289,8 @@ static void handle_key(App& a, SDL_Keycode k, bool& running)
 	case SDLK_o:      handle_button(a, BTN_CIRCLE, running); break;
 	case SDLK_COMMA:  handle_button(a, BTN_L1, running); break;
 	case SDLK_PERIOD: handle_button(a, BTN_R1, running); break;
-	case SDLK_s:      handle_button(a, BTN_TRIANGLE, running); break;
+	case SDLK_s:      handle_button(a, BTN_OPTIONS, running); break;
+	case SDLK_g:      handle_button(a, BTN_TRIANGLE, running); break;
 	case SDLK_f:      handle_button(a, BTN_SQUARE, running); break;
 	case SDLK_c:      a.crt = !a.crt; break;
 	case SDLK_LEFT:   handle_button(a, BTN_DLEFT, running); break;
@@ -250,8 +298,8 @@ static void handle_key(App& a, SDL_Keycode k, bool& running)
 	case SDLK_UP:     handle_button(a, BTN_DUP, running); break;
 	case SDLK_DOWN:   handle_button(a, BTN_DDOWN, running); break;
 	case SDLK_RETURN:
-		if (a.browser) handle_button(a, BTN_CROSS, running);
-		else handle_button(a, BTN_OPTIONS, running);
+		if (a.browser || a.picker) handle_button(a, BTN_CROSS, running);
+		else a.card_frames = 6 * FPS;
 		break;
 	case SDLK_h:      handle_button(a, BTN_TOUCHPAD, running); break;
 	}
@@ -391,7 +439,7 @@ int main(int argc, char** argv)
 		}
 		int vis = ui::pattern_channels_visible();
 		int shown = a.player.info().channels - a.ch_offset < vis ? a.player.info().channels - a.ch_offset : vis;
-		ui::info_panel(a.player.info(), a.snap, a.source_text, a.player.volume(), a.radio_mode, a.ch_offset, shown);
+		ui::info_panel(a.player.info(), a.snap, a.detail_text, a.player.volume(), a.radio_mode, a.ch_offset, shown);
 		if (a.show_scopes) {
 			a.player.scope(scope_buf, SCOPE_SAMPLES);
 			ui::scope_panel(scope_buf, SCOPE_SAMPLES, a.snap);
@@ -406,7 +454,12 @@ int main(int argc, char** argv)
 		if (a.radio.state() == RadioState::Loading) ui::loading_badge(a.frame);
 		if (a.card_frames > 0) {
 			int alpha = a.card_frames > 5 * FPS + 50 ? (6 * FPS - a.card_frames) * 256 / 10 : (a.card_frames < 20 ? a.card_frames * 256 / 20 : 256);
-			ui::now_playing_card(a.player.info(), a.source_text, alpha > 256 ? 256 : alpha);
+			char station[48] = "";
+			if (a.source == Source::Radio) {
+				snprintf(station, sizeof(station), "%.40s", a.radio.station_info().name);
+				for (char* q = station; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
+			}
+			ui::now_playing_card(a.player.info(), a.source_text, station, alpha > 256 ? 256 : alpha);
 			a.card_frames--;
 		}
 		if (a.toast_frames > 0) {
@@ -415,6 +468,7 @@ int main(int argc, char** argv)
 			a.toast_frames--;
 		}
 		if (a.browser) ui::file_browser(a.library, a.browser_sel, a.browser_first);
+		if (a.picker) ui::station_picker(a.picker_sel, a.picker_first, a.radio.station());
 		if (a.help) ui::help_overlay();
 
 		SDL_UpdateTexture(texture, NULL, gfx::fb, gfx::W * sizeof(uint32_t));

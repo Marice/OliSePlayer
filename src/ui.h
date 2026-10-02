@@ -22,15 +22,17 @@ int pattern_channels_visible();
    row_frac 0..1 scrolls smoothly towards the next row. */
 void pattern_view(const Player& p, const Snapshot& s, int ch_offset, float row_frac, int frame, int energy, int fx_level);
 
-void info_panel(const TrackInfo& ti, const Snapshot& s, const char* source, int volume, bool radio_on, int ch_first, int ch_shown);
+void info_panel(const TrackInfo& ti, const Snapshot& s, const char* detail, int volume, bool radio_on, int ch_first, int ch_shown);
 void instrument_panel(const Player& p, const Snapshot& s, int frame);
 void scope_panel(const int16_t* samples, int n, const Snapshot& s);
 void copyright_line(int y);
 
 /* Overlays. */
-void now_playing_card(const TrackInfo& ti, const char* source, int alpha256);
+void now_playing_card(const TrackInfo& ti, const char* source, const char* station, int alpha256);
 void toast(const char* line1, const char* line2, int alpha256);
 void file_browser(const Library& lib, int sel, int first);
+/* Station list: fixed stations followed by all genres. */
+void station_picker(int sel, int first, int current);
 void help_overlay();
 void loading_badge(int frame);
 

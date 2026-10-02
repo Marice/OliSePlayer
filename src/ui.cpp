@@ -7,6 +7,7 @@
 
 #include "effects.h"
 #include "gfx.h"
+#include "stations.h"
 
 namespace ui {
 
@@ -165,7 +166,7 @@ static void fmt_time(char* out, size_t n, int ms)
 	snprintf(out, n, "%d:%02d", sec / 60, sec % 60);
 }
 
-void info_panel(const TrackInfo& ti, const Snapshot& s, const char* source, int volume, bool radio_on, int ch_first, int ch_shown)
+void info_panel(const TrackInfo& ti, const Snapshot& s, const char* detail, int volume, bool radio_on, int ch_first, int ch_shown)
 {
 	int x = LEFT_X, y = PANEL_Y, w = PANEL_W, h = PANEL_H;
 	gfx::bevel(x, y, w, h);
@@ -174,7 +175,8 @@ void info_panel(const TrackInfo& ti, const Snapshot& s, const char* source, int 
 	if (!ti.loaded) {
 		gfx::text(tx, ty, "NO MODULE", gfx::TEXT_DIM);
 		gfx::text(tx, ty + 10, "R3: RANDOM TRACK FROM THE MOD ARCHIVE", gfx::TEXT);
-		gfx::text(tx, ty + 20, "CIRCLE: LOCAL FILES", gfx::TEXT);
+		gfx::text(tx, ty + 20, "TRIANGLE: PICK A STATION / GENRE", gfx::TEXT);
+		gfx::text(tx, ty + 30, "CIRCLE: LOCAL FILES", gfx::TEXT);
 		return;
 	}
 	snprintf(buf, sizeof(buf), "%.37s", ti.title[0] ? ti.title : "(untitled)");
@@ -188,10 +190,11 @@ void info_panel(const TrackInfo& ti, const Snapshot& s, const char* source, int 
 	else
 		snprintf(buf, sizeof(buf), "POS %02X/%02X PAT %02X ROW %02X", s.pos, ti.length ? ti.length - 1 : 0, s.pattern, s.row);
 	gfx::text(tx, ty + 20, buf, gfx::TEXT);
-	snprintf(buf, sizeof(buf), "SPD %02d BPM %03d  %s / %s", s.speed, s.bpm, t1, t2);
-	gfx::text(tx, ty + 30, buf, gfx::TEXT);
-	snprintf(buf, sizeof(buf), "%-16.16s VOL %3d%% %s", source, volume, s.paused ? "PAUSED" : (radio_on ? "RADIO" : "LOOP"));
-	gfx::text(tx, ty + 40, buf, s.paused ? gfx::EFFECT : gfx::TEXT);
+	snprintf(buf, sizeof(buf), "SPD %02d BPM %03d %s/%s VOL %3d%% %s", s.speed, s.bpm, t1, t2, volume,
+	         s.paused ? "PAUSE" : (radio_on ? "RADIO" : "LOOP"));
+	gfx::text(tx, ty + 30, buf, s.paused ? gfx::EFFECT : gfx::TEXT);
+	snprintf(buf, sizeof(buf), "%.37s", detail);
+	gfx::text(tx, ty + 40, buf, gfx::INSTR);
 	/* Progress line along the bottom edge. */
 	if (s.total_ms > 0) {
 		int pw = (w - 12) * (s.time_ms > s.total_ms ? s.total_ms : s.time_ms) / s.total_ms;
@@ -245,7 +248,7 @@ void copyright_line(int y)
 	gfx::text_outlined(gfx::W / 2 - gfx::text_width(l) / 2, y, l, gfx::ROWNUM);
 }
 
-void now_playing_card(const TrackInfo& ti, const char* source, int alpha)
+void now_playing_card(const TrackInfo& ti, const char* source, const char* station, int alpha)
 {
 	if (alpha <= 0) return;
 	int w = 440, h = 74;
@@ -265,8 +268,40 @@ void now_playing_card(const TrackInfo& ti, const char* source, int alpha)
 	gfx::text(x + 10, y + 42, buf, gfx::TEXT);
 	char t[16];
 	fmt_time(t, sizeof(t), ti.total_time_ms);
-	snprintf(buf, sizeof(buf), "%s  LENGTH %s", source, t);
+	snprintf(buf, sizeof(buf), "%.30s  LENGTH %s", source, t);
 	gfx::text(x + 10, y + 54, buf, gfx::INSTR);
+	if (station && *station) {
+		snprintf(buf, sizeof(buf), "%.24s", station);
+		gfx::text(x + w - 10 - gfx::text_width(buf), y + 8, buf, gfx::VOLUME);
+	}
+}
+
+void station_picker(int sel, int first, int current)
+{
+	int w = 480, h = 232;
+	int x = gfx::W / 2 - w / 2, y = 64;
+	gfx::dim(0, 0, gfx::W, gfx::H, 110);
+	gfx::bevel(x, y, w, h);
+	gfx::text(x + 8, y + 6, "MOD ARCHIVE STATIONS", gfx::WHITE);
+	char hdr[32];
+	snprintf(hdr, sizeof(hdr), "%d/%d", sel + 1, station_count());
+	gfx::text(x + w - 8 - gfx::text_width(hdr), y + 6, hdr, gfx::TEXT_DIM);
+	gfx::field(x + 6, y + 18, w - 12, h - 44);
+	int lines = (h - 48) / 10;
+	for (int i = 0; i < lines && first + i < station_count(); i++) {
+		int idx = first + i;
+		int ly = y + 22 + i * 10;
+		Station st = station_at(idx);
+		if (idx == sel) gfx::fill(x + 8, ly - 1, w - 16, 10, gfx::HILITE);
+		bool genre = st.kind == STATION_GENRE;
+		if (genre && idx == NUM_FIXED_STATIONS) gfx::text(x + 14, ly, "GENRES:", gfx::TEXT_DIM);
+		char name[52];
+		snprintf(name, sizeof(name), "%.44s", st.name);
+		for (char* q = name; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
+		gfx::text(x + (genre ? 78 : 14), ly, name, idx == sel ? gfx::WHITE : (genre ? gfx::TEXT : gfx::INSTR));
+		if (idx == current) gfx::text(x + w - 30, ly, ">", gfx::VU_LOW);
+	}
+	gfx::text(x + 8, y + h - 20, "CROSS: TUNE IN   CIRCLE: CLOSE   UP/DOWN: SELECT", gfx::TEXT_DIM);
 }
 
 void toast(const char* line1, const char* line2, int alpha)
@@ -313,14 +348,14 @@ void help_overlay()
 		"R3 ............ NEXT RANDOM TRACK (MOD ARCHIVE)",
 		"L3 ............ PREVIOUS TRACK",
 		"CROSS ......... PAUSE / PLAY",
+		"TRIANGLE ...... STATIONS: GENRES, FORMATS, CHARTS",
 		"CIRCLE ........ LOCAL FILE LIST",
 		"L1 / R1 ....... PREVIOUS / NEXT LOCAL FILE",
-		"TRIANGLE ...... INSTRUMENTS <-> SCOPES",
+		"OPTIONS ....... INSTRUMENTS <-> SCOPES",
 		"SQUARE ........ EFFECTS: FULL / CALM / OFF",
 		"R2 ............ CRT SCANLINES",
 		"D-PAD L/R ..... SCROLL CHANNELS",
 		"D-PAD U/D ..... VOLUME  (HOLD L2: SEEK)",
-		"OPTIONS ....... SHOW NOW PLAYING",
 		"TOUCHPAD ...... THIS HELP",
 		"L2 + R2 ....... EXIT",
 	};
