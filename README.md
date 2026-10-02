@@ -1,100 +1,88 @@
-# OliSe Player (PlayStation 5)
+# OliSe Player
 
-A tracker-music radio for the PS5 with a FastTracker II heart. It streams
-random MOD / XM / S3M / IT modules from [The Mod Archive](https://modarchive.org),
-shows the pattern data live while it plays, and wraps it all in demoscene
-eye candy: starfield, 3D chrome logo, twisting ribbon scroller, copper bars,
-oscilloscope and VU meters.
+Tracker music radio for the PS5, in FastTracker II style.
 
 ![logo](assets/logo.png)
 
-> **Requires a jailbroken PS5.** This is unsigned homebrew for a console
-> with an ELF loader (elfldr / etaHEN / websrv). A network connection is
-> needed for The Mod Archive; without it the player uses the local `music/`
-> folder.
+OliSe Player grabs random MOD, XM, S3M and IT tunes from
+[The Mod Archive](https://modarchive.org) and plays them one after the
+other on your PS5. Pick a genre (chiptune, trance, jazz, whatever you feel
+like), pick a format, or just let it run. While a tune plays you see the
+pattern data scroll by, like in the old tracker days, with a starfield, a
+chrome logo, a scroller, copper bars and VU meters around it.
 
-## Controls (DualSense)
+You need a jailbroken PS5 with an ELF loader (etaHEN, elfldr or websrv).
+Internet is needed for The Mod Archive. Without it the player plays the
+files from its own `music/` folder.
 
-Press **Touchpad** any time for this list on-screen.
+## Controls
 
-| Button | Action |
+Press the touchpad for this list on screen.
+
+| Button | What it does |
 |---|---|
-| **R3** | Next track from the current station |
-| **L3** | Previous track (history) |
-| **Triangle** | Stations: random, featured, top rated, per format, 78 genres |
-| **Cross** | Pause / play |
-| **Circle** | Local file list (`music/`) |
-| **L1** / **R1** | Previous / next local file (page up/down in lists) |
-| **Options** | Instrument list <-> oscilloscope and VU meters |
-| **Square** | Effects: full / calm / off |
-| **R2** | CRT scanlines |
-| **D-pad left / right** | Scroll channels in the pattern view |
-| **D-pad up / down** | Volume (hold **L2**: seek by pattern) |
-| **Touchpad** | Help |
-| **L2 + R2** (together) | Quit back to the launcher |
+| R3 | Next track |
+| L3 | Previous track |
+| Triangle | Choose a station: random, featured, top rated, a format or a genre |
+| Cross | Pause / play |
+| Circle | Browse the local `music/` folder |
+| L1 / R1 | Previous / next local file (page up / down in lists) |
+| Options | Switch the right panel between instruments and scopes |
+| Square | Effects: full, calm, off |
+| R2 | CRT scanlines on / off |
+| D-pad left / right | Scroll through the channels |
+| D-pad up / down | Volume (hold L2 to jump through the song) |
+| L2 + R2 | Quit |
 
-Keyboard for the desktop build: `n`/`p` next/previous, `g` stations, Space
-pause, `o` file list, `,`/`.` local prev/next, `s` scopes, `f` effects,
-`c` CRT, arrows channels/volume, Enter now-playing, `h` help, Esc quit.
+On the desktop build: `n` / `p` next and previous, `g` stations, space
+pause, `o` file list, `s` scopes, `f` effects, `c` CRT, arrows for channels
+and volume, `h` help, Esc quits.
 
-## Music and stations
+## Where the music comes from
 
-Everything comes from [The Mod Archive](https://modarchive.org) over plain
-HTTP, using the same pages a browser sees (the XML API needs a key):
+All tunes come from The Mod Archive. The player uses the normal website
+pages, the same ones you see in a browser, because the XML API needs a key.
+A genre station picks a random page from that genre and a random module on
+it. The featured and top rated stations pick from the current charts.
 
-| Station | How it picks |
-|---|---|
-| Random, any format | `request=view_random&format=<MOD/XM/S3M/IT>` with a random format |
-| Random per format | the same, fixed format |
-| Featured picks / Top rated | a random module from `request=view_chart&query=featured` or `topscore` |
-| Genre (78 of them) | a random page of `request=search&search_type=genre&query=<id>`, then a random module on it |
+A track plays once and then the next one from the same station starts. The
+last 20 tracks stay in memory, so L3 goes back without downloading again.
+If the network drops, the player keeps trying with longer pauses and plays
+local files in the meantime.
 
-Only MOD, XM, S3M and IT are played (libxmp-lite); other formats on a page
-are skipped. A track plays once, then the next one from the same station
-starts. The last 20 tracks stay in memory so L3 can go back without a new
-download. Without network the player retries with a growing delay and
-keeps playing local files.
+Local files go in `music/` next to `eboot.elf`. On the PS5 that is
+`/data/homebrew/OliSePlayer/music/`.
 
-`tools/netxm_test.c` runs the page parsers offline against saved HTML.
+## Installing on the PS5
 
-Local modules go in `music/` next to `eboot.elf`
-(`/data/homebrew/OliSePlayer/music/` on the PS5).
+Download the zip from the releases page and copy the `OliSePlayer` folder
+to `/data/homebrew/` on your console (FTP works fine). It then shows up in
+the [websrv](https://github.com/ps5-payload-dev/websrv) homebrew menu.
 
-## Building
+## Building it yourself
 
-Needs the [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk)
-with its [SDL2 port](https://github.com/ps5-payload-dev/SDL) installed, plus
-`cmake` for the libxmp-lite build. Then:
+You need the [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk)
+with the [SDL2 port](https://github.com/ps5-payload-dev/SDL) installed, and
+cmake for libxmp.
 
 ```sh
 export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make deps           # builds libxmp-lite into deps/ (PS5 + native)
-make                # builds eboot.elf
-make homebrew       # assembles dist/OliSePlayer/ + zip for the launcher
+make deps        # builds libxmp-lite into deps/
+make             # eboot.elf
+make homebrew    # dist/OliSePlayer/ and a zip
 ```
 
-A desktop test build (`make native`, needs `libsdl2-dev`) plays local files
-from `music/`; the Mod Archive download is only compiled for the PS5.
+`make native` builds a desktop version (needs libsdl2-dev) that plays
+files from `music/`. The Mod Archive part only works on the PS5.
 
-`make assets` regenerates the logo header and the icon with
-`tools/make_logo.py` and `tools/make_icon.py` (needs `python3-pil`).
+`make assets` regenerates the logo and the icon with the Python scripts in
+`tools/` (needs Pillow). `tools/netxm_test.c` tests the page parsing
+without a network.
 
-## Installing on a jailbroken PS5
+## Thanks
 
-Copy `dist/OliSePlayer/` to `/data/homebrew/OliSePlayer/` on the PS5
-(`eboot.elf` + `sce_sys/icon0.png`). It then appears in the
-[websrv](https://github.com/ps5-payload-dev/websrv) homebrew menu.
-
-For a quick dev loop, send the ELF to a console running elfldr:
-
-```sh
-make test PS5_HOST=<ps5-ip>
-```
-
-## Credits
-
-- Music: [The Mod Archive](https://modarchive.org) and every artist on it
-- Module playback: [libxmp-lite](https://github.com/libxmp/libxmp) (MIT)
-- 8x8 bitmap font: [font8x8](https://github.com/dhepper/font8x8) by Daniel Hepper (public domain)
-- PS5 toolchain and SDL2 port: [ps5-payload-dev](https://github.com/ps5-payload-dev)
-- Look and feel inspired by FastTracker II (Triton, 1994-1997)
+- The Mod Archive and everyone who uploaded music there
+- [libxmp](https://github.com/libxmp/libxmp) for playing the modules
+- [font8x8](https://github.com/dhepper/font8x8) by Daniel Hepper
+- [ps5-payload-dev](https://github.com/ps5-payload-dev) for the toolchain and SDL2
+- Triton, for FastTracker II
