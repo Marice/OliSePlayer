@@ -41,8 +41,7 @@ static const char GREETINGS[] =
 	"      *** OLISE PLAYER ***   TRACKER RADIO FOR THE PLAYSTATION 5 ... "
 	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
 	"GREETINGS TO ALL TRACKER MUSICIANS AND THE PS5 HOMEBREW SCENE ... "
-	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ... "
-	"RESPECT TO TRITON FOR FASTTRACKER II ... KEEP THE SCENE ALIVE ...      ";
+	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ...      ";
 
 enum class Source { None, Local, Radio };
 
@@ -383,8 +382,7 @@ int main(int argc, char** argv)
 		fx::logo(gfx::W / 2, 50, a.frame, a.fx_level);
 		if (a.fx_level > 0) {
 			char text[512];
-			snprintf(text, sizeof(text), "%s NOW PLAYING: %s ...      ", GREETINGS,
-			         a.player.info().loaded ? a.player.info().title : "NOTHING YET");
+			snprintf(text, sizeof(text), "%s", GREETINGS);
 			fx::twister(text, a.scroll_x, a.frame, 118, a.fx_level);
 			a.scroll_x -= a.fx_level > 1 ? 2.2f : 1.6f;
 			if (a.scroll_x < -fx::twister_text_width(text)) a.scroll_x = gfx::W;
