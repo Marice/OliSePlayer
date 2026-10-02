@@ -190,7 +190,7 @@ void info_panel(const TrackInfo& ti, const Snapshot& s, const char* detail, int 
 	else
 		snprintf(buf, sizeof(buf), "POS %02X/%02X PAT %02X ROW %02X", s.pos, ti.length ? ti.length - 1 : 0, s.pattern, s.row);
 	gfx::text(tx, ty + 20, buf, gfx::TEXT);
-	snprintf(buf, sizeof(buf), "SPD %02d BPM %03d %s/%s VOL %3d%% %s", s.speed, s.bpm, t1, t2, volume,
+	snprintf(buf, sizeof(buf), "SPD %02d BPM %03d %s/%s VOL %d%% %s", s.speed, s.bpm, t1, t2, volume,
 	         s.paused ? "PAUSE" : (radio_on ? "RADIO" : "LOOP"));
 	gfx::text(tx, ty + 30, buf, s.paused ? gfx::EFFECT : gfx::TEXT);
 	snprintf(buf, sizeof(buf), "%.37s", detail);
