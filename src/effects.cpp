@@ -160,6 +160,7 @@ void twister(const char* text, float scroll_x, int frame, int base_y, int level)
 	float twist_speed = level > 1 ? 0.045f : 0.0f;
 	float spatial = 0.014f;
 
+	/* Pass 1: the twisting ribbon. Front side bluish, back side purple. */
 	for (int x = 0; x < gfx::W; x++) {
 		float cy = base_y + 9.f * sinf(x * 0.018f + t * 1.7f) + 5.f * sinf(x * 0.041f - t * 2.3f);
 		float theta = x * spatial - frame * twist_speed;
@@ -167,8 +168,6 @@ void twister(const char* text, float scroll_x, int frame, int base_y, int level)
 		float sn = level > 1 ? sinf(theta) : 0.f;
 		float as = fabsf(s);
 		if (as < 0.04f) continue;
-
-		/* Ribbon band: front side bluish, back side purple, lit by sn. */
 		int half = (int)(TW_RIBBON * as);
 		uint32_t band = s >= 0 ? 0x2c4c8c : 0x3a2c5c;
 		int light = 170 + (int)(70 * sn);
@@ -180,34 +179,23 @@ void twister(const char* text, float scroll_x, int frame, int base_y, int level)
 			uint32_t c = edge ? gfx::blend(band, gfx::WHITE, 90) : band;
 			gfx::fb[y * gfx::W + x] = gfx::blend(gfx::fb[y * gfx::W + x], c, edge ? 230 : 150);
 		}
+	}
 
-		/* Text column: which glyph column lands on this screen column?
-		   The back of the ribbon stays blank so the text remains readable. */
-		if (s < 0.12f) continue;
-		int tx = (int)floorf(x - scroll_x);
-		if (tx < 0) continue;
-		int ci = tx / TW_GLYPH;
-		if (ci >= len) continue;
+	/* Pass 2: big chrome letters riding the same wave, never squashed.
+	   Each glyph follows the ribbon centre at its own middle column, with a
+	   full black outline so it reads on any background. */
+	uint32_t rows[TW_GLYPH];
+	for (int r = 0; r < TW_GLYPH; r++) rows[r] = chrome_row(r);
+	for (int ci = 0; ci < len; ci++) {
+		int gx = (int)floorf(scroll_x) + ci * TW_GLYPH;
+		if (gx + TW_GLYPH < 0 || gx >= gfx::W) continue;
 		unsigned char ch = (unsigned char)text[ci];
 		if (ch == ' ' || ch > 127) continue;
-		int col = (tx % TW_GLYPH) / TW_SCALE;
-		const unsigned char* g = gfx::glyph(ch);
-		for (int r = 0; r < TW_GLYPH; r++) {
-			int row = r / TW_SCALE;
-			if (!((unsigned char)g[row] & (1 << col))) continue;
-			int rr = s >= 0 ? r : (TW_GLYPH - 1 - r); /* mirrored on the back */
-			float fy = cy + (rr - TW_GLYPH / 2 + 0.5f) * s;
-			int y = (int)floorf(fy);
-			uint32_t c = chrome_row(r);
-			if (s < 0) c = gfx::shade(c, 120);
-			/* Outline above/below keeps the glyph readable on the ribbon. */
-			gfx::put(x, y - 1, gfx::blend(gfx::fb[((y - 1) < 0 ? 0 : (y - 1)) * gfx::W + x], gfx::BLACK, 200));
-			gfx::put(x, y + 1, gfx::blend(gfx::fb[((y + 1) >= gfx::H ? gfx::H - 1 : (y + 1)) * gfx::W + x], gfx::BLACK, 200));
-			gfx::put(x, y, c);
-			if (as > 0.6f) gfx::put(x, y + (s >= 0 ? 1 : -1), c); /* thicken when facing us */
-		}
+		float mx = gx + TW_GLYPH / 2.f;
+		float cy = base_y + 7.f * sinf(mx * 0.018f + t * 1.7f) + 3.f * sinf(mx * 0.041f - t * 2.3f);
+		int gy = (int)(cy - TW_GLYPH / 2);
+		gfx::glyph_scaled(gx, gy, ch, TW_SCALE, rows, gfx::BLACK, true);
 	}
-	/* Left/right outline of glyph columns is implicit (neighbour columns). */
 }
 
 /* ---------------------------------------------------------- raster bars */
