@@ -1,0 +1,465 @@
+/* OliSe Player: a FastTracker II flavoured tracker radio for the PS5.
+ *
+ * Plays MOD / XM / S3M / IT modules (libxmp-lite), streams random tracks
+ * from The Mod Archive, and shows the pattern data live, demoscene style.
+ */
+#include <SDL2/SDL.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "effects.h"
+#include "gfx.h"
+#include "library.h"
+#include "player.h"
+#include "radio.h"
+#include "ui.h"
+
+/* DualSense button indices as SDL reports them. */
+#define BTN_CROSS     0
+#define BTN_CIRCLE    1
+#define BTN_SQUARE    2
+#define BTN_TRIANGLE  3
+#define BTN_TOUCHPAD  4
+#define BTN_OPTIONS   6
+#define BTN_L3        7
+#define BTN_R3        8
+#define BTN_L1        9
+#define BTN_R1        10
+#define BTN_DUP       11
+#define BTN_DDOWN     12
+#define BTN_DLEFT     13
+#define BTN_DRIGHT    14
+#define AXIS_L2       4
+#define AXIS_R2       5
+
+#define FPS 60
+
+static const char GREETINGS[] =
+	"      *** OLISE PLAYER ***   TRACKER RADIO FOR THE PLAYSTATION 5 ... "
+	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
+	"GREETINGS TO ALL TRACKER MUSICIANS AND THE PS5 HOMEBREW SCENE ... "
+	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ... "
+	"RESPECT TO TRITON FOR FASTTRACKER II ... KEEP THE SCENE ALIVE ...      ";
+
+enum class Source { None, Local, Radio };
+
+struct App {
+	Player player;
+	Radio radio;
+	Library library;
+	Snapshot snap;
+
+	Source source = Source::None;
+	char source_text[48] = "NO SOURCE";
+	bool radio_mode = true;        /* auto-next on track end */
+	int fx_level = 2;              /* 2 full, 1 calm, 0 off */
+	bool crt = false;
+	bool show_scopes = false;
+	bool help = false;
+	bool browser = false;
+	int browser_sel = 0, browser_first = 0;
+	int ch_offset = 0;
+	int card_frames = 0;           /* now-playing card countdown */
+	int toast_frames = 0;
+	char toast1[64] = "", toast2[64] = "";
+	int retry_frames = 0;          /* radio backoff */
+	int retry_delay = 10 * FPS;
+	bool l2_down = false, r2_down = false;
+	float scroll_x = gfx::W;
+	Uint32 row_change_ms = 0;
+	int last_row = -1, last_pos = -1;
+	int frame = 0;
+	char appdir[512] = "";
+};
+
+static void show_toast(App& a, const char* l1, const char* l2)
+{
+	strncpy(a.toast1, l1, sizeof(a.toast1) - 1);
+	strncpy(a.toast2, l2 ? l2 : "", sizeof(a.toast2) - 1);
+	a.toast_frames = 4 * FPS;
+}
+
+static void on_track_started(App& a)
+{
+	a.card_frames = 6 * FPS;
+	a.ch_offset = 0;
+	a.last_row = -1;
+	fx::warp();
+	fprintf(stderr, "NOW PLAYING: %s [%s] %d ch (%s)\n", a.player.info().title, a.player.info().type,
+	        a.player.info().channels, a.source_text);
+}
+
+static bool play_local(App& a, int index)
+{
+	if (index < 0 || index >= a.library.count()) return false;
+	a.library.set_current(index);
+	if (!a.player.load_file(a.library.path(index), a.radio_mode ? 1 : 0)) {
+		show_toast(a, "COULD NOT LOAD FILE", a.library.name(index));
+		return false;
+	}
+	a.source = Source::Local;
+	snprintf(a.source_text, sizeof(a.source_text), "LOCAL %d/%d", index + 1, a.library.count());
+	on_track_started(a);
+	return true;
+}
+
+static bool play_radio_track(App& a, const RadioTrack& t)
+{
+	if (!a.player.load_memory(t.data, t.len, 1)) {
+		show_toast(a, "MODULE FAILED TO LOAD", t.title);
+		return false;
+	}
+	a.source = Source::Radio;
+	snprintf(a.source_text, sizeof(a.source_text), "MOD ARCHIVE #%ld", t.module_id);
+	on_track_started(a);
+	return true;
+}
+
+static void start_radio_fetch(App& a)
+{
+	if (a.radio.state() == RadioState::Loading) return;
+	if (!a.radio.fetch()) {
+		show_toast(a, "RADIO UNAVAILABLE", a.radio.error());
+		a.radio.ack_failed();
+	}
+}
+
+static void next_track(App& a)
+{
+	if (a.radio.has_next()) {
+		const RadioTrack* t = a.radio.next();
+		if (t) play_radio_track(a, *t);
+		return;
+	}
+	start_radio_fetch(a);
+}
+
+static void prev_track(App& a)
+{
+	if (a.radio.has_prev()) {
+		const RadioTrack* t = a.radio.prev();
+		if (t) play_radio_track(a, *t);
+	} else if (a.source == Source::Local && a.library.count() > 0) {
+		play_local(a, a.library.prev());
+	} else {
+		show_toast(a, "NO PREVIOUS TRACK", nullptr);
+	}
+}
+
+static void poll_radio(App& a)
+{
+	RadioState st = a.radio.state();
+	if (st == RadioState::Ready) {
+		RadioTrack t;
+		if (a.radio.take(t)) {
+			if (play_radio_track(a, t)) {
+				a.radio.remember(t);
+				a.retry_delay = 10 * FPS;
+			} else {
+				free(t.data);
+			}
+		}
+	} else if (st == RadioState::Failed) {
+		fprintf(stderr, "radio: %s\n", a.radio.error());
+		a.radio.ack_failed();
+		char l2[64];
+		snprintf(l2, sizeof(l2), "RETRY IN %d S", a.retry_delay / FPS);
+		show_toast(a, a.radio.error(), l2);
+		a.retry_frames = a.retry_delay;
+		if (a.retry_delay < 60 * FPS) a.retry_delay *= 2;
+		/* Keep the music going with a local file while offline. */
+		if (!a.player.info().loaded && a.library.count() > 0) play_local(a, a.library.current());
+	}
+	if (a.retry_frames > 0 && --a.retry_frames == 0 && a.radio_mode && a.source != Source::Local) {
+		start_radio_fetch(a);
+	}
+}
+
+static void handle_button(App& a, int b, bool& running)
+{
+	if (a.browser) {
+		switch (b) {
+		case BTN_DUP:   if (a.browser_sel > 0) a.browser_sel--; break;
+		case BTN_DDOWN: if (a.browser_sel + 1 < a.library.count()) a.browser_sel++; break;
+		case BTN_CROSS:
+			if (play_local(a, a.browser_sel)) a.browser = false;
+			break;
+		case BTN_CIRCLE:
+		case BTN_TOUCHPAD:
+			a.browser = false;
+			break;
+		}
+		int lines = 18;
+		if (a.browser_sel < a.browser_first) a.browser_first = a.browser_sel;
+		if (a.browser_sel >= a.browser_first + lines) a.browser_first = a.browser_sel - lines + 1;
+		return;
+	}
+	if (a.help) {
+		a.help = false;
+		return;
+	}
+	switch (b) {
+	case BTN_R3:       next_track(a); break;
+	case BTN_L3:       prev_track(a); break;
+	case BTN_CROSS:    a.player.set_paused(!a.player.paused()); break;
+	case BTN_CIRCLE:
+		a.library.scan(a.appdir);
+		a.browser = true;
+		a.browser_sel = a.library.current();
+		break;
+	case BTN_L1:       if (a.library.count()) play_local(a, a.library.prev()); break;
+	case BTN_R1:       if (a.library.count()) play_local(a, a.library.next()); break;
+	case BTN_TRIANGLE: a.show_scopes = !a.show_scopes; break;
+	case BTN_SQUARE:   a.fx_level = (a.fx_level + 2) % 3; break;
+	case BTN_DLEFT:    if (a.ch_offset > 0) a.ch_offset--; break;
+	case BTN_DRIGHT:   a.ch_offset++; break;
+	case BTN_DUP:
+		if (a.l2_down) a.player.seek_positions(1);
+		else a.player.set_volume(a.player.volume() + 5);
+		break;
+	case BTN_DDOWN:
+		if (a.l2_down) a.player.seek_positions(-1);
+		else a.player.set_volume(a.player.volume() - 5);
+		break;
+	case BTN_OPTIONS:  a.card_frames = 6 * FPS; break;
+	case BTN_TOUCHPAD: a.help = true; break;
+	default:
+		fprintf(stderr, "input: unmapped joystick button %d\n", b);
+		break;
+	}
+	(void)running;
+}
+
+static void handle_key(App& a, SDL_Keycode k, bool& running)
+{
+	switch (k) {
+	case SDLK_ESCAPE: running = false; break;
+	case SDLK_n:      handle_button(a, BTN_R3, running); break;
+	case SDLK_p:      handle_button(a, BTN_L3, running); break;
+	case SDLK_SPACE:  handle_button(a, BTN_CROSS, running); break;
+	case SDLK_o:      handle_button(a, BTN_CIRCLE, running); break;
+	case SDLK_COMMA:  handle_button(a, BTN_L1, running); break;
+	case SDLK_PERIOD: handle_button(a, BTN_R1, running); break;
+	case SDLK_s:      handle_button(a, BTN_TRIANGLE, running); break;
+	case SDLK_f:      handle_button(a, BTN_SQUARE, running); break;
+	case SDLK_c:      a.crt = !a.crt; break;
+	case SDLK_LEFT:   handle_button(a, BTN_DLEFT, running); break;
+	case SDLK_RIGHT:  handle_button(a, BTN_DRIGHT, running); break;
+	case SDLK_UP:     handle_button(a, BTN_DUP, running); break;
+	case SDLK_DOWN:   handle_button(a, BTN_DDOWN, running); break;
+	case SDLK_RETURN:
+		if (a.browser) handle_button(a, BTN_CROSS, running);
+		else handle_button(a, BTN_OPTIONS, running);
+		break;
+	case SDLK_h:      handle_button(a, BTN_TOUCHPAD, running); break;
+	}
+}
+
+/* Directory of the executable, so music/ next to eboot.elf is found. */
+static void app_dir(const char* argv0, char* out, size_t n)
+{
+	out[0] = 0;
+	if (!argv0) return;
+	const char* slash = strrchr(argv0, '/');
+	if (!slash) return;
+	size_t len = (size_t)(slash - argv0);
+	if (len >= n) len = n - 1;
+	memcpy(out, argv0, len);
+	out[len] = 0;
+}
+
+int main(int argc, char** argv)
+{
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) {
+		fprintf(stderr, "Failed SDL_Init: %s\n", SDL_GetError());
+		return 1;
+	}
+	SDL_Window* window = SDL_CreateWindow("OliSe Player", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+	                                      gfx::W * 2, gfx::H * 2, SDL_WINDOW_FULLSCREEN_DESKTOP);
+	if (!window) {
+		fprintf(stderr, "Failed CreateWindow: %s\n", SDL_GetError());
+		return 1;
+	}
+	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, gfx::W, gfx::H);
+	if (!renderer || !texture) {
+		fprintf(stderr, "Failed renderer/texture: %s\n", SDL_GetError());
+		return 1;
+	}
+	int out_w = 0, out_h = 0;
+	SDL_GetRendererOutputSize(renderer, &out_w, &out_h);
+	if (out_h <= 0) out_h = 1080;
+	SDL_Texture* scanlines = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 1, out_h);
+	if (scanlines) {
+		uint32_t* rows = (uint32_t*)malloc(out_h * sizeof(uint32_t));
+		for (int i = 0; i < out_h; i++) rows[i] = (i % 3 == 2) ? 0x50000000 : 0x00000000;
+		SDL_UpdateTexture(scanlines, NULL, rows, sizeof(uint32_t));
+		free(rows);
+		SDL_SetTextureBlendMode(scanlines, SDL_BLENDMODE_BLEND);
+	}
+	SDL_Joystick* joy = SDL_JoystickOpen(0);
+
+	App a;
+	app_dir(argc > 0 ? argv[0] : nullptr, a.appdir, sizeof(a.appdir));
+	fx::init((unsigned)time(NULL));
+	if (!a.player.init()) fprintf(stderr, "player init failed, continuing without audio\n");
+	a.library.scan(a.appdir);
+
+	/* Start: a local file if there is one, and kick off the radio. */
+	if (a.library.count() > 0) play_local(a, 0);
+	if (Radio::available()) start_radio_fetch(a);
+	else show_toast(a, "DESKTOP BUILD: NO MOD ARCHIVE", "USE LOCAL FILES");
+
+	/* OLISE_SCREENSHOT=<path.bmp> saves a frame after a few seconds and exits
+	   (used for README screenshots and headless checks). */
+	const char* shot_path = SDL_getenv("OLISE_SCREENSHOT");
+	int shot_frame = 240;
+	if (SDL_getenv("OLISE_SCREENSHOT_FRAME")) shot_frame = atoi(SDL_getenv("OLISE_SCREENSHOT_FRAME"));
+
+	int16_t scope_buf[SCOPE_SAMPLES];
+	bool running = true;
+	Uint64 perf_freq = SDL_GetPerformanceFrequency();
+	Uint64 next_frame = SDL_GetPerformanceCounter();
+	Uint64 frame_budget = perf_freq / FPS;
+	Uint32 fps_t0 = SDL_GetTicks();
+	int fps_frames = 0;
+
+	while (running) {
+		SDL_Event ev;
+		while (SDL_PollEvent(&ev)) {
+			if (ev.type == SDL_QUIT) {
+				running = false;
+			} else if (ev.type == SDL_JOYBUTTONDOWN) {
+				handle_button(a, ev.jbutton.button, running);
+			} else if (ev.type == SDL_JOYAXISMOTION) {
+				if (ev.jaxis.axis == AXIS_R2) {
+					bool down = ev.jaxis.value > 20000;
+					if (down && !a.r2_down && !a.l2_down) a.crt = !a.crt;
+					a.r2_down = down;
+				} else if (ev.jaxis.axis == AXIS_L2) {
+					a.l2_down = ev.jaxis.value > 20000;
+				}
+				if (a.l2_down && a.r2_down) running = false;
+			} else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) {
+				handle_key(a, ev.key.keysym.sym, running);
+			}
+		}
+
+		poll_radio(a);
+		if (a.player.track_ended()) {
+			if (a.radio_mode && a.source == Source::Radio) {
+				next_track(a);
+			} else if (a.source == Source::Local && a.library.count() > 0) {
+				play_local(a, a.library.next());
+			}
+		}
+
+		/* Snapshot the player state once per frame. */
+		a.player.snapshot(a.snap);
+		Uint32 now = SDL_GetTicks();
+		if (a.snap.row != a.last_row || a.snap.pos != a.last_pos) {
+			a.last_row = a.snap.row;
+			a.last_pos = a.snap.pos;
+			a.row_change_ms = now;
+		}
+		float row_frac = 0.f;
+		if (a.snap.loaded && !a.snap.paused && a.snap.speed > 0 && a.snap.frame_time_us > 0) {
+			float row_ms = a.snap.speed * a.snap.frame_time_us / 1000.f;
+			row_frac = (now - a.row_change_ms) / row_ms;
+			if (row_frac > 1.f) row_frac = 1.f;
+			if (row_frac < 0.f) row_frac = 0.f;
+		}
+		int energy = 0;
+		for (int c = 0; c < a.snap.chn; c++) energy += a.snap.ch[c].volume;
+		if (a.snap.chn) energy /= a.snap.chn;
+
+		/* ---- compose the frame ---- */
+		gfx::clear(gfx::BLACK);
+		fx::stars_update(energy);
+		fx::stars_draw(0, ui::PANEL_Y - 2);
+		fx::logo(gfx::W / 2, 50, a.frame, a.fx_level);
+		if (a.fx_level > 0) {
+			char text[512];
+			snprintf(text, sizeof(text), "%s NOW PLAYING: %s ...      ", GREETINGS,
+			         a.player.info().loaded ? a.player.info().title : "NOTHING YET");
+			fx::twister(text, a.scroll_x, a.frame, 118, a.fx_level);
+			a.scroll_x -= a.fx_level > 1 ? 2.2f : 1.6f;
+			if (a.scroll_x < -fx::twister_text_width(text)) a.scroll_x = gfx::W;
+		} else {
+			ui::copyright_line(114);
+		}
+		int vis = ui::pattern_channels_visible();
+		int shown = a.player.info().channels - a.ch_offset < vis ? a.player.info().channels - a.ch_offset : vis;
+		ui::info_panel(a.player.info(), a.snap, a.source_text, a.player.volume(), a.radio_mode, a.ch_offset, shown);
+		if (a.show_scopes) {
+			a.player.scope(scope_buf, SCOPE_SAMPLES);
+			ui::scope_panel(scope_buf, SCOPE_SAMPLES, a.snap);
+		} else {
+			ui::instrument_panel(a.player, a.snap, a.frame);
+		}
+		ui::pattern_view(a.player, a.snap, a.ch_offset, row_frac, a.frame, energy, a.fx_level);
+		if (a.ch_offset > a.player.info().channels - ui::pattern_channels_visible())
+			a.ch_offset = a.player.info().channels - ui::pattern_channels_visible();
+		if (a.ch_offset < 0) a.ch_offset = 0;
+
+		if (a.radio.state() == RadioState::Loading) ui::loading_badge(a.frame);
+		if (a.card_frames > 0) {
+			int alpha = a.card_frames > 5 * FPS + 50 ? (6 * FPS - a.card_frames) * 256 / 10 : (a.card_frames < 20 ? a.card_frames * 256 / 20 : 256);
+			ui::now_playing_card(a.player.info(), a.source_text, alpha > 256 ? 256 : alpha);
+			a.card_frames--;
+		}
+		if (a.toast_frames > 0) {
+			int alpha = a.toast_frames < 20 ? a.toast_frames * 256 / 20 : 256;
+			ui::toast(a.toast1, a.toast2, alpha);
+			a.toast_frames--;
+		}
+		if (a.browser) ui::file_browser(a.library, a.browser_sel, a.browser_first);
+		if (a.help) ui::help_overlay();
+
+		SDL_UpdateTexture(texture, NULL, gfx::fb, gfx::W * sizeof(uint32_t));
+		SDL_RenderClear(renderer);
+		SDL_RenderCopy(renderer, texture, NULL, NULL);
+		if (a.crt && scanlines) SDL_RenderCopy(renderer, scanlines, NULL, NULL);
+		if (shot_path && a.frame == shot_frame) {
+			SDL_Surface* shot = SDL_CreateRGBSurfaceWithFormat(0, gfx::W, gfx::H, 32, SDL_PIXELFORMAT_ARGB8888);
+			if (shot) {
+				memcpy(shot->pixels, gfx::fb, sizeof(gfx::fb));
+				SDL_SaveBMP(shot, shot_path);
+				SDL_FreeSurface(shot);
+				fprintf(stderr, "screenshot saved to %s\n", shot_path);
+			}
+			running = false;
+		}
+		SDL_RenderPresent(renderer);
+
+		a.frame++;
+		fps_frames++;
+		if (now - fps_t0 >= 10000) {
+			fprintf(stderr, "fps: %.1f\n", fps_frames * 1000.f / (now - fps_t0));
+			fps_t0 = now;
+			fps_frames = 0;
+		}
+
+		/* Frame pacing without drift. */
+		next_frame += frame_budget;
+		Uint64 cur = SDL_GetPerformanceCounter();
+		if (next_frame > cur) {
+			Uint32 wait_ms = (Uint32)((next_frame - cur) * 1000 / perf_freq);
+			if (wait_ms > 0) SDL_Delay(wait_ms);
+		} else if (cur - next_frame > frame_budget * 4) {
+			next_frame = cur; /* fell far behind, resync */
+		}
+	}
+
+	a.player.shutdown();
+	if (scanlines) SDL_DestroyTexture(scanlines);
+	SDL_DestroyTexture(texture);
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	if (joy) SDL_JoystickClose(joy);
+	SDL_Quit();
+	return 0;
+}

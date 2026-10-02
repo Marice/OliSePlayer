@@ -1,0 +1,9 @@
+/eboot.elf
+/OliSePlayer-native
+/dist/
+*.o
+# third-party builds (tools/build-deps.sh)
+/deps/
+# local test modules
+/music/*
+!/music/README.txt
