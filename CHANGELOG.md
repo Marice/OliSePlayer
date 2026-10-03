@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [01.000.000] - 2026-10-03
+
+First native PS5 title release (homebrew.page catalog format). Tags now
+follow the `contentVersion` in `sce_sys/param.json`.
+
 ### Added
 - Native PS5 title build (title ID PPSA01153): `make` produces a signed
   `eboot.bin` with `sce_sys` and `libc.prx`, ready for ShadowMountPlus and
