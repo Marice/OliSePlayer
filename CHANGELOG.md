@@ -6,6 +6,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The title reserved about 337 MB of `/download0` storage it never used
+  (`downloadDataSize` 256 from the template); it is now 0. Remove and
+  re-add the app once to free the space of an earlier install.
+- `make upload` now stops on FTP errors and prints the local and remote
+  hash of `eboot.bin`.
+
 ## [01.000.000] - 2026-10-03
 
 First native PS5 title release (homebrew.page catalog format). Tags now
