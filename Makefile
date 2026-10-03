@@ -57,7 +57,7 @@ RUNTIME_INPUTS := tools/rebuild-libc.sh tools/build-host-tools.sh tools/ninja-bu
 XMP_PS5 := deps/ps5/lib/libxmp-lite.a
 
 .PHONY: all app build init doctor deps pacbrew pacbrew-list assets-check libc ffpkg ffpfsc packages deploy undeploy \
-	payload native assets upload clean distclean help
+	payload native assets upload music-folder clean distclean help
 
 all: app
 build: app
@@ -102,6 +102,14 @@ $(RUNTIME): $(RUNTIME_INPUTS)
 app: $(RUNTIME) $(XMP_PS5)
 	@printf '%s\n' '==> [app] Compiling, linking, signing, and assembling the app folder'
 	@bash tools/build.sh Folder
+	@$(MAKE) --no-print-directory music-folder
+
+# Local modules live in <title>/music; ship the folder with a note and re-zip.
+music-folder:
+	@mkdir -p dist/$(TITLE_ID)/music
+	@cp music/README.txt dist/$(TITLE_ID)/music/README.txt
+	@cd dist && rm -f $(TITLE_ID).zip && python3 -m zipfile -c $(TITLE_ID).zip $(TITLE_ID)
+	@printf '%s\n' '==> [music] Added music/README.txt to the app folder and zip'
 
 ffpkg: $(RUNTIME) $(XMP_PS5)
 	@printf '%s\n' '==> [ffpkg] Building the app folder and UFS2 image'
