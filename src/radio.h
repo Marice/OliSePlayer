@@ -5,7 +5,6 @@
 #include <SDL2/SDL.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <vector>
 
 #include "stations.h"
 
@@ -47,11 +46,11 @@ public:
 	/* History of played Mod Archive tracks; remember() takes ownership. */
 	void remember(RadioTrack& t);
 	bool has_prev() const { return idx_ > 0; }
-	bool has_next() const { return idx_ + 1 < (int)hist_.size(); }
+	bool has_next() const { return idx_ + 1 < hist_n_; }
 	const RadioTrack* prev();
 	const RadioTrack* next();
-	const RadioTrack* current() const { return (idx_ >= 0 && idx_ < (int)hist_.size()) ? &hist_[idx_] : nullptr; }
-	int history_size() const { return (int)hist_.size(); }
+	const RadioTrack* current() const { return (idx_ >= 0 && idx_ < hist_n_) ? &hist_[idx_] : nullptr; }
+	int history_size() const { return hist_n_; }
 	int history_index() const { return idx_; }
 
 private:
@@ -63,7 +62,9 @@ private:
 	int station_ = 0;
 	int job_station_ = 0;
 	char error_[128] = {0};
-	std::vector<RadioTrack> hist_;
+	static constexpr int HISTORY_CAP = 20;
+	RadioTrack hist_[HISTORY_CAP];
+	int hist_n_ = 0;
 	int idx_ = -1;
 	size_t hist_bytes_ = 0;
 };

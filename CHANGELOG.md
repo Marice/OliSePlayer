@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Native PS5 title build (title ID PPSA01153): `make` produces a signed
+  `eboot.bin` with `sce_sys` and `libc.prx`, ready for ShadowMountPlus and
+  the homebrew.page catalog. Uses the ps5-native-app-boilerplate tooling.
+- `make upload` copies the title folder to the console over FTP.
+- `LICENSE` (GPL-3.0-or-later) and `THIRD_PARTY_NOTICES.md`.
+
+### Changed
+- The websrv/elfldr payload build moved to `Makefile.payload` (`make payload`).
+- Local file list and track history no longer use the C++ standard library
+  containers, so the native build links without libc++.
+
 ## [v0.1.0] - 2026-10-02
 
 Sneak preview build.

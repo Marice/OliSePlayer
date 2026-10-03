@@ -11,9 +11,22 @@ like), pick a format, or just let it run. While a tune plays you see the
 pattern data scroll by, like in the old tracker days, with a starfield, a
 chrome logo, a scroller, copper bars and VU meters around it.
 
-You need a jailbroken PS5 with an ELF loader (etaHEN, elfldr or websrv).
-Internet is needed for The Mod Archive. Without it the player plays the
-files from its own `music/` folder.
+You need a jailbroken PS5. Internet is needed for The Mod Archive; without
+it the player plays the files from its own `music/` folder.
+
+## Two ways to run it
+
+**As a native app (title ID PPSA01153).** This is the normal way. The
+release zip contains a `PPSA01153` folder with `eboot.bin` and `sce_sys`.
+Copy that folder to `/data/homebrew/` on the console (FTP works fine) and
+[ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) adds it to
+your home screen like any other game. Local modules go in
+`/data/homebrew/PPSA01153/music/`.
+
+**As a websrv payload.** The release also has `OliSePlayer.zip` with an
+`eboot.elf`. Copy the `OliSePlayer` folder to `/data/homebrew/` and start
+it from the [websrv](https://github.com/ps5-payload-dev/websrv) homebrew
+menu. Same app, no home screen tile.
 
 ## Controls
 
@@ -50,30 +63,26 @@ last 20 tracks stay in memory, so L3 goes back without downloading again.
 If the network drops, the player keeps trying with longer pauses and plays
 local files in the meantime.
 
-Local files go in `music/` next to `eboot.elf`. On the PS5 that is
-`/data/homebrew/OliSePlayer/music/`.
-
-## Installing on the PS5
-
-Download the zip from the releases page and copy the `OliSePlayer` folder
-to `/data/homebrew/` on your console (FTP works fine). It then shows up in
-the [websrv](https://github.com/ps5-payload-dev/websrv) homebrew menu.
-
 ## Building it yourself
 
-You need the [ps5-payload-dev SDK](https://github.com/ps5-payload-dev/sdk)
-with the [SDL2 port](https://github.com/ps5-payload-dev/SDL) installed, and
-cmake for libxmp.
+You need Linux or WSL with clang-18, lld-18, cmake, ninja (`pip install
+ninja` is enough) and Python 3. The first build downloads the public PS5
+Payload SDK and the PacBrew ports (about 350 MB) into `.deps/`.
 
 ```sh
-export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
-make deps        # builds libxmp-lite into deps/
-make             # eboot.elf
-make homebrew    # dist/OliSePlayer/ and a zip
+make deps        # libxmp-lite, SDK and PacBrew
+make             # dist/PPSA01153/ and dist/PPSA01153.zip (native title)
+make ffpfsc      # also a compressed .ffpfsc image
+make upload      # copy the folder to the PS5 over FTP (port 1337)
+make payload     # eboot.elf for websrv / elfldr (needs PS5_PAYLOAD_SDK)
+make native      # desktop version, plays files from music/
 ```
 
-`make native` builds a desktop version (needs libsdl2-dev) that plays
-files from `music/`. The Mod Archive part only works on the PS5.
+The native title build uses the tooling from BlackBearReloaded's
+[ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate):
+it links with LLVM, converts the ELF to a PS5 module, signs it as a
+development FSELF and adds a source-built `libc.prx`. See
+`THIRD_PARTY_NOTICES.md` for all licenses.
 
 `make assets` regenerates the logo and the icon with the Python scripts in
 `tools/` (needs Pillow). `tools/netxm_test.c` tests the page parsing
@@ -85,4 +94,9 @@ without a network.
 - [libxmp](https://github.com/libxmp/libxmp) for playing the modules
 - [font8x8](https://github.com/dhepper/font8x8) by Daniel Hepper
 - [ps5-payload-dev](https://github.com/ps5-payload-dev) for the toolchain and SDL2
+- BlackBearReloaded for the native app tooling and the homebrew catalog
 - Triton, for FastTracker II
+
+## License
+
+GPL-3.0-or-later. See `LICENSE` and `THIRD_PARTY_NOTICES.md`.

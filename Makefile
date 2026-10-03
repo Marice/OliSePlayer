@@ -1,75 +1,166 @@
-PS5_HOST ?= ps5
-PS5_PORT ?= 9021
+# OliSe Player - Linux/WSL build entry points.
+#
+# Native PS5 title build (eboot.bin + sce_sys, for ShadowMountPlus and the
+# homebrew.page catalog) based on the ps5-native-app-boilerplate tooling:
+# Copyright (C) 2026 BlackBearReloaded, SPDX-License-Identifier: GPL-3.0-or-later.
+# The websrv/elfldr payload build lives in Makefile.payload (make payload).
 
-TITLE := OliSePlayer
-ELF   := eboot.elf
+SHELL := /bin/bash
+.DEFAULT_GOAL := app
+# pip-installed ninja lives in ~/.local/bin
+export PATH := $(HOME)/.local/bin:$(PATH)
 
-ifdef PS5_PAYLOAD_SDK
-    include $(PS5_PAYLOAD_SDK)/toolchain/prospero.mk
-else
-    $(warning PS5_PAYLOAD_SDK is undefined - only the 'native' target will work)
-endif
+-include .env
 
-# SDL2 flags via the SDK's pkg-config wrapper. The PS5 SDL2 build does not
-# pull in libsamplerate, and math lives in libc on the PS5.
-SDL_CFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 2>/dev/null)
-SDL_LIBS   := $(filter-out -lsamplerate -lm,$(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null))
+# --- OliSe Player defaults -------------------------------------------------
+# libxmp-lite is built by tools/build-deps.sh into deps/ (same public SDK).
+APP_DEFINITIONS ?= OLISE_NET OLISE_NATIVE
+APP_INCLUDE_PATHS ?= deps/ps5/include/libxmp-lite
+APP_STATIC_ARCHIVES ?= deps/ps5/lib/libxmp-lite.a
+# SDL2 from PacBrew as plain archives: its pkg-config file drags in -lSce* flags
+# that the boilerplate linker command cannot resolve by name.
+PACBREW_PACKAGES ?=
+PACBREW_INCLUDE_PATHS ?= include
+PACBREW_STATIC_ARCHIVES ?= lib/libSDL2.a lib/libiconv.a
+APP_CATEGORY ?= media
+APP_NAME ?= OliSe Player
+TITLE_ID ?= PPSA01153
 
-# libxmp-lite (MOD/XM/S3M/IT) is built by tools/build-deps.sh into deps/.
-XMP_PS5    := deps/ps5
-XMP_NATIVE := deps/native
+# --- boilerplate variables -------------------------------------------------
+APP_RUNTIME_MODULES ?=
+APP_WRAP_SYMBOLS ?=
+APP_SOURCE_DIR ?=
+APP_PARAM ?=
+APP_SCE_SYS ?=
+APP_ASSETS ?= assets
+APP_ROOT_FILES ?=
+PS5_HOST ?= 192.168.68.125
+FTP_PORT ?= 2121
+DEPLOY_FORMAT ?= folder
+PS5_FTP_USER ?= anonymous
+PS5_FTP_PASSWORD ?= codex
+DEPLOY_DRY_RUN ?= 0
+CONTENT_SUFFIX ?=
+BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
+USE_CCACHE ?= 0
+export BUILD_JOBS USE_CCACHE
+export APP_DEFINITIONS APP_INCLUDE_PATHS APP_STATIC_ARCHIVES APP_RUNTIME_MODULES APP_WRAP_SYMBOLS
+export APP_SOURCE_DIR APP_PARAM APP_SCE_SYS APP_ASSETS APP_ROOT_FILES
+export PACBREW_PACKAGES PACBREW_INCLUDE_PATHS PACBREW_STATIC_ARCHIVES
+export PS5_HOST FTP_PORT DEPLOY_FORMAT PS5_FTP_USER PS5_FTP_PASSWORD DEPLOY_DRY_RUN
+export TITLE_ID APP_NAME APP_CATEGORY CONTENT_SUFFIX
 
-# OLISE_NET enables the Mod Archive downloader (Sony net/http libs);
-# the desktop build compiles the stub instead.
-CFLAGS   := -Wall -O2 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
-CXXFLAGS := -Wall -O2 -std=c++17 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
-LDLIBS   := $(XMP_PS5)/lib/libxmp-lite.a $(SDL_LIBS) -lSceNet -lSceSsl -lSceHttp2
+RUNTIME := runtime/libc.prx
+RUNTIME_INPUTS := tools/rebuild-libc.sh tools/build-host-tools.sh tools/ninja-build.sh \
+	$(wildcard tooling/native/*.cpp tooling/native/*.hpp) \
+	$(wildcard tooling/native/runtime/*.txt)
+XMP_PS5 := deps/ps5/lib/libxmp-lite.a
 
-CXX_SRCS := src/main.cpp src/gfx.cpp src/player.cpp src/library.cpp src/radio.cpp src/effects.cpp src/ui.cpp
-C_SRCS   := src/netxm.c
-OBJS     := $(CXX_SRCS:src/%.cpp=%.o) $(C_SRCS:src/%.c=%.o)
-HEADERS  := $(wildcard src/*.h)
+.PHONY: all app build init doctor deps pacbrew pacbrew-list assets-check libc ffpkg ffpfsc packages deploy undeploy \
+	payload native assets upload clean distclean help
 
-# --- PS5 payload build ---
-$(ELF): $(OBJS) $(XMP_PS5)/lib/libxmp-lite.a
-	$(CXX) $(OBJS) -o $@ $(LDLIBS)
+all: app
+build: app
 
-%.o: src/%.cpp $(HEADERS)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+init:
+	@printf '%s\n' '==> [init] Configuring the application identity in sce_sys/param.json'
+	@bash tools/init-project.sh sce_sys/param.json
 
-%.o: src/%.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
+doctor:
+	@printf '%s\n' '==> [doctor] Checking the Linux/WSL host without changing it'
+	@bash tools/doctor.sh
 
-$(XMP_PS5)/lib/libxmp-lite.a $(XMP_NATIVE)/lib/libxmp-lite.a:
-	tools/build-deps.sh
+deps: $(XMP_PS5)
+	@printf '%s\n' '==> [deps] Fetching declared native dependencies'
+	@bash tools/setup-native-dependencies.sh
+	@bash tools/setup-pacbrew-dependencies.sh --environment
 
-deps: $(XMP_PS5)/lib/libxmp-lite.a
+$(XMP_PS5):
+	@printf '%s\n' '==> [deps] Building libxmp-lite'
+	@tools/build-deps.sh
+
+pacbrew:
+	@printf '%s\n' '==> [pacbrew] Fetching the pinned prebuilt ports sysroot'
+	@bash tools/setup-pacbrew-dependencies.sh --all
+
+pacbrew-list:
+	@printf '%s\n' '==> [pacbrew] Listing available pkg-config modules'
+	@bash tools/setup-pacbrew-dependencies.sh --list
+
+assets-check:
+	@printf '%s\n' '==> [assets] Validating icon, backgrounds, and selection audio'
+	@bash tools/validate-assets.sh
+
+libc:
+	@printf '%s\n' '==> [libc] Rebuilding and verifying the clean-room runtime'
+	@bash tools/rebuild-libc.sh
+
+$(RUNTIME): $(RUNTIME_INPUTS)
+	@printf '%s\n' '==> [libc] Generating the missing or outdated runtime'
+	@bash tools/rebuild-libc.sh
+
+app: $(RUNTIME) $(XMP_PS5)
+	@printf '%s\n' '==> [app] Compiling, linking, signing, and assembling the app folder'
+	@bash tools/build.sh Folder
+
+ffpkg: $(RUNTIME) $(XMP_PS5)
+	@printf '%s\n' '==> [ffpkg] Building the app folder and UFS2 image'
+	@bash tools/build.sh Ffpkg
+
+ffpfsc: $(RUNTIME) $(XMP_PS5)
+	@printf '%s\n' '==> [ffpfsc] Building the app folder and compressed image'
+	@bash tools/build.sh Ffpfsc
+
+packages: $(RUNTIME) $(XMP_PS5)
+	@printf '%s\n' '==> [packages] Building the app folder and both package formats'
+	@bash tools/build.sh All
+
+deploy:
+	@printf '%s\n' '==> [deploy] Building and publishing the selected app output over FTP'
+	@bash tools/deploy.sh
+
+undeploy:
+	@printf '%s\n' '==> [undeploy] Removing staged development files for this title over FTP'
+	@bash tools/deploy.sh undeploy
+
+# Plain curl upload of dist/<TITLE_ID>/ to /data/homebrew/<TITLE_ID>/ (etaHEN FTP on 1337).
+upload: app
+	@printf '%s\n' '==> [upload] Copying dist/$(TITLE_ID) to ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/'
+	@cd dist/$(TITLE_ID) && find . -type f | while read -r f; do \
+		curl -s --ftp-create-dirs -T "$$f" "ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/$${f#./}" || exit 1; \
+	done; echo "uploaded"
+UPLOAD_PORT ?= 1337
+
+# --- websrv / elfldr payload build and desktop build (Makefile.payload) ----
+payload:
+	@$(MAKE) -f Makefile.payload
+
+native:
+	@$(MAKE) -f Makefile.payload native
 
 # Regenerate the logo header and the icon (needs python3-pil).
-assets: tools/make_logo.py tools/make_icon.py
+assets:
 	tools/make_logo.py
 	tools/make_icon.py
 
-# Deploy to a jailbroken PS5 running elfldr on PS5_PORT.
-test: $(ELF)
-	$(PS5_DEPLOY) -h $(PS5_HOST) -p $(PS5_PORT) $(ELF)
-
-# Assemble the /data/homebrew/OliSePlayer layout for the websrv launcher.
-homebrew: $(ELF) sce_sys/icon0.png
-	mkdir -p dist/$(TITLE)/sce_sys dist/$(TITLE)/music
-	cp $(ELF) dist/$(TITLE)/eboot.elf
-	cp sce_sys/icon0.png dist/$(TITLE)/sce_sys/icon0.png
-	cp music/README.txt dist/$(TITLE)/music/README.txt
-	cd dist && rm -f $(TITLE).zip && zip -r $(TITLE).zip $(TITLE)
-
-# --- Desktop smoke test (needs libsdl2-dev) ---
-NATIVE_CXXFLAGS := -O2 -Wall -std=c++17 -I$(XMP_NATIVE)/include/libxmp-lite $(shell sdl2-config --cflags)
-native: $(CXX_SRCS) $(C_SRCS) $(HEADERS) $(XMP_NATIVE)/lib/libxmp-lite.a
-	gcc -O2 -Wall -c src/netxm.c -o netxm-native.o
-	g++ $(NATIVE_CXXFLAGS) -o $(TITLE)-native $(CXX_SRCS) netxm-native.o \
-		$(XMP_NATIVE)/lib/libxmp-lite.a $(shell sdl2-config --libs) -lm
-
 clean:
-	rm -rf $(ELF) *.o $(TITLE)-native dist
+	@printf '%s\n' '==> [clean] Removing generated build outputs'
+	@rm -rf -- build dist
+	@rm -f -- $(RUNTIME)
+	@$(MAKE) -f Makefile.payload clean
 
-.PHONY: test homebrew native deps assets clean
+distclean: clean
+	@printf '%s\n' '==> [distclean] Removing downloaded dependency caches'
+	@rm -rf -- .deps
+
+help:
+	@printf '%s\n' \
+	  'make                 Build the native title folder dist/PPSA01153 and the zip' \
+	  'make deps            Build libxmp-lite and fetch the SDK and PacBrew (sdl2)' \
+	  'make ffpfsc          Also build the compressed .ffpfsc image' \
+	  'make upload          Build and copy the folder to the PS5 over FTP (port 1337)' \
+	  'make payload         Build the websrv/elfldr eboot.elf (Makefile.payload)' \
+	  'make native          Build the desktop test binary' \
+	  'make assets          Regenerate logo header and icon' \
+	  'make doctor          Check the host toolchain' \
+	  'make clean           Remove build outputs'

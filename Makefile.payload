@@ -1,0 +1,75 @@
+PS5_HOST ?= ps5
+PS5_PORT ?= 9021
+
+TITLE := OliSePlayer
+ELF   := eboot.elf
+
+ifdef PS5_PAYLOAD_SDK
+    include $(PS5_PAYLOAD_SDK)/toolchain/prospero.mk
+else
+    $(warning PS5_PAYLOAD_SDK is undefined - only the 'native' target will work)
+endif
+
+# SDL2 flags via the SDK's pkg-config wrapper. The PS5 SDL2 build does not
+# pull in libsamplerate, and math lives in libc on the PS5.
+SDL_CFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 2>/dev/null)
+SDL_LIBS   := $(filter-out -lsamplerate -lm,$(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null))
+
+# libxmp-lite (MOD/XM/S3M/IT) is built by tools/build-deps.sh into deps/.
+XMP_PS5    := deps/ps5
+XMP_NATIVE := deps/native
+
+# OLISE_NET enables the Mod Archive downloader (Sony net/http libs);
+# the desktop build compiles the stub instead.
+CFLAGS   := -Wall -O2 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
+CXXFLAGS := -Wall -O2 -std=c++17 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
+LDLIBS   := $(XMP_PS5)/lib/libxmp-lite.a $(SDL_LIBS) -lSceNet -lSceSsl -lSceHttp2
+
+CXX_SRCS := src/main.cpp src/gfx.cpp src/player.cpp src/library.cpp src/radio.cpp src/effects.cpp src/ui.cpp
+C_SRCS   := src/netxm.c
+OBJS     := $(CXX_SRCS:src/%.cpp=%.o) $(C_SRCS:src/%.c=%.o)
+HEADERS  := $(wildcard src/*.h)
+
+# --- PS5 payload build ---
+$(ELF): $(OBJS) $(XMP_PS5)/lib/libxmp-lite.a
+	$(CXX) $(OBJS) -o $@ $(LDLIBS)
+
+%.o: src/%.cpp $(HEADERS)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+%.o: src/%.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(XMP_PS5)/lib/libxmp-lite.a $(XMP_NATIVE)/lib/libxmp-lite.a:
+	tools/build-deps.sh
+
+deps: $(XMP_PS5)/lib/libxmp-lite.a
+
+# Regenerate the logo header and the icon (needs python3-pil).
+assets: tools/make_logo.py tools/make_icon.py
+	tools/make_logo.py
+	tools/make_icon.py
+
+# Deploy to a jailbroken PS5 running elfldr on PS5_PORT.
+test: $(ELF)
+	$(PS5_DEPLOY) -h $(PS5_HOST) -p $(PS5_PORT) $(ELF)
+
+# Assemble the /data/homebrew/OliSePlayer layout for the websrv launcher.
+homebrew: $(ELF) sce_sys/icon0.png
+	mkdir -p dist/$(TITLE)/sce_sys dist/$(TITLE)/music
+	cp $(ELF) dist/$(TITLE)/eboot.elf
+	cp sce_sys/icon0.png dist/$(TITLE)/sce_sys/icon0.png
+	cp music/README.txt dist/$(TITLE)/music/README.txt
+	cd dist && rm -f $(TITLE).zip && zip -r $(TITLE).zip $(TITLE)
+
+# --- Desktop smoke test (needs libsdl2-dev) ---
+NATIVE_CXXFLAGS := -O2 -Wall -std=c++17 -I$(XMP_NATIVE)/include/libxmp-lite $(shell sdl2-config --cflags)
+native: $(CXX_SRCS) $(C_SRCS) $(HEADERS) $(XMP_NATIVE)/lib/libxmp-lite.a
+	gcc -O2 -Wall -c src/netxm.c -o netxm-native.o
+	g++ $(NATIVE_CXXFLAGS) -o $(TITLE)-native $(CXX_SRCS) netxm-native.o \
+		$(XMP_NATIVE)/lib/libxmp-lite.a $(shell sdl2-config --libs) -lm
+
+clean:
+	rm -rf $(ELF) *.o $(TITLE)-native dist
+
+.PHONY: test homebrew native deps assets clean

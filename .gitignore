@@ -8,3 +8,9 @@
 /music/*
 !/music/README.txt
 /netxm_test
+
+# native app build (boilerplate tooling)
+/.deps/
+/build/
+/runtime/libc.prx
+/.env

@@ -351,6 +351,10 @@ int main(int argc, char** argv)
 
 	App a;
 	app_dir(argc > 0 ? argv[0] : nullptr, a.appdir, sizeof(a.appdir));
+#ifdef OLISE_NATIVE
+	/* Native title: the app folder is mounted read-only at /app0. */
+	if (!a.appdir[0]) strncpy(a.appdir, "/app0", sizeof(a.appdir) - 1);
+#endif
 	fx::init((unsigned)time(NULL));
 	if (!a.player.init()) fprintf(stderr, "player init failed, continuing without audio\n");
 	a.library.scan(a.appdir);

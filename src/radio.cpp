@@ -8,13 +8,12 @@
 #include "player.h"
 
 static const size_t HISTORY_BYTES_CAP = 40u * 1024u * 1024u;
-static const int HISTORY_CAP = 20;
 
 Radio::~Radio()
 {
 	if (thread_) SDL_WaitThread(thread_, nullptr);
 	free(pending_.data);
-	for (RadioTrack& t : hist_) free(t.data);
+	for (int i = 0; i < hist_n_; i++) free(hist_[i].data);
 }
 
 bool Radio::available()
@@ -132,20 +131,24 @@ void Radio::ack_failed()
 void Radio::remember(RadioTrack& t)
 {
 	/* Drop anything after the current index (new branch after "previous"). */
-	while ((int)hist_.size() > idx_ + 1) {
-		hist_bytes_ -= hist_.back().len;
-		free(hist_.back().data);
-		hist_.pop_back();
+	while (hist_n_ > idx_ + 1) {
+		hist_n_--;
+		hist_bytes_ -= hist_[hist_n_].len;
+		free(hist_[hist_n_].data);
+		hist_[hist_n_] = RadioTrack();
 	}
-	hist_.push_back(t);
+	/* Make room: drop the oldest entries while over the caps. */
+	while ((hist_n_ >= HISTORY_CAP || (hist_n_ > 0 && hist_bytes_ + t.len > HISTORY_BYTES_CAP)) && hist_n_ > 0) {
+		hist_bytes_ -= hist_[0].len;
+		free(hist_[0].data);
+		for (int i = 1; i < hist_n_; i++) hist_[i - 1] = hist_[i];
+		hist_n_--;
+		hist_[hist_n_] = RadioTrack();
+	}
+	hist_[hist_n_++] = t;
 	hist_bytes_ += t.len;
 	t = RadioTrack();
-	while ((hist_.size() > (size_t)HISTORY_CAP || hist_bytes_ > HISTORY_BYTES_CAP) && hist_.size() > 1) {
-		hist_bytes_ -= hist_.front().len;
-		free(hist_.front().data);
-		hist_.erase(hist_.begin());
-	}
-	idx_ = (int)hist_.size() - 1;
+	idx_ = hist_n_ - 1;
 }
 
 const RadioTrack* Radio::prev()
