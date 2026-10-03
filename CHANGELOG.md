@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [01.000.001] - 2026-10-03
+
 ### Fixed
 - The title reserved about 337 MB of `/download0` storage it never used
   (`downloadDataSize` 256 from the template); it is now 0. Remove and
