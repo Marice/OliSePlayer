@@ -1,5 +1,5 @@
-/eboot.elf
 /OliSePlayer-native
+/src/version.h
 /dist/
 *.o
 # third-party builds (tools/build-deps.sh)

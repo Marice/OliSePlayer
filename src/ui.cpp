@@ -357,7 +357,7 @@ void help_overlay()
 		"D-PAD L/R ..... SCROLL CHANNELS",
 		"D-PAD U/D ..... VOLUME  (HOLD L2: SEEK)",
 		"TOUCHPAD ...... THIS HELP",
-		"L2 + R2 ....... EXIT",
+		"PS BUTTON ..... CLOSE THE APP",
 	};
 	int n = (int)(sizeof(lines) / sizeof(lines[0]));
 	int w = 420, h = 24 + n * 10 + 8;

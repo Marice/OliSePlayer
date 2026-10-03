@@ -11,22 +11,19 @@ like), pick a format, or just let it run. While a tune plays you see the
 pattern data scroll by, like in the old tracker days, with a starfield, a
 chrome logo, a scroller, copper bars and VU meters around it.
 
-You need a jailbroken PS5. Internet is needed for The Mod Archive; without
-it the player plays the files from its own `music/` folder.
+You need a jailbroken PS5 with
+[ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus). Internet is
+needed for The Mod Archive; without it the player plays the files from its
+own `music/` folder.
 
-## Two ways to run it
+## Installing
 
-**As a native app (title ID PPSA01153).** This is the normal way. The
-release zip contains a `PPSA01153` folder with `eboot.bin` and `sce_sys`.
-Copy that folder to `/data/homebrew/` on the console (FTP works fine) and
-[ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus) adds it to
-your home screen like any other game. Local modules go in
-`/data/homebrew/PPSA01153/music/`.
-
-**As a websrv payload.** The release also has `OliSePlayer.zip` with an
-`eboot.elf`. Copy the `OliSePlayer` folder to `/data/homebrew/` and start
-it from the [websrv](https://github.com/ps5-payload-dev/websrv) homebrew
-menu. Same app, no home screen tile.
+OliSe Player is a native PS5 app with title ID PPSA01153. The release zip
+contains a `PPSA01153` folder with `eboot.bin` and `sce_sys`. Copy that
+folder to `/data/homebrew/` on the console (FTP works fine) and
+ShadowMountPlus adds it to your home screen like any other game. Local
+modules go in `/data/homebrew/PPSA01153/music/`. Close the app with the PS
+button like any other game.
 
 ## Controls
 
@@ -45,7 +42,6 @@ Press the touchpad for this list on screen.
 | R2 | CRT scanlines on / off |
 | D-pad left / right | Scroll through the channels |
 | D-pad up / down | Volume (hold L2 to jump through the song) |
-| L2 + R2 | Quit |
 
 On the desktop build: `n` / `p` next and previous, `g` stations, space
 pause, `o` file list, `s` scopes, `f` effects, `c` CRT, arrows for channels
@@ -71,12 +67,14 @@ Payload SDK and the PacBrew ports (about 350 MB) into `.deps/`.
 
 ```sh
 make deps        # libxmp-lite, SDK and PacBrew
-make             # dist/PPSA01153/ and dist/PPSA01153.zip (native title)
+make             # dist/PPSA01153/ and dist/PPSA01153.zip
 make ffpfsc      # also a compressed .ffpfsc image
 make upload      # copy the folder to the PS5 over FTP (port 1337)
-make payload     # eboot.elf for websrv / elfldr (needs PS5_PAYLOAD_SDK)
 make native      # desktop version, plays files from music/
 ```
+
+Releases are tagged with the `contentVersion` from `sce_sys/param.json`
+(for example `01.000.001`); the same number is shown in the app.
 
 The native title build uses the tooling from BlackBearReloaded's
 [ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate):

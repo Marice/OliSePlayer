@@ -12,6 +12,7 @@
 
 #include "dbg.h"
 #include "display.h"
+#include "version.h"
 #include "effects.h"
 #include "gfx.h"
 #include "library.h"
@@ -407,7 +408,6 @@ int main(int argc, char** argv)
 				} else if (ev.jaxis.axis == AXIS_L2) {
 					a.l2_down = ev.jaxis.value > 20000;
 				}
-				if (a.l2_down && a.r2_down) running = false;
 			} else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) {
 				handle_key(a, ev.key.keysym.sym, running);
 			}
@@ -446,6 +446,8 @@ int main(int argc, char** argv)
 		fx::stars_update(energy);
 		fx::stars_draw(0, ui::PANEL_Y - 2);
 		fx::logo(gfx::W / 2, 50, a.frame, a.fx_level);
+		/* Version, small, to the right of the logo at its baseline. */
+		gfx::text_outlined(gfx::W / 2 + fx::logo_width() / 2 + 6, 50 + fx::logo_height() / 2 - 12, "V" OLISE_VERSION, gfx::TEXT_DIM);
 		if (a.fx_level > 0) {
 			char text[512];
 			snprintf(text, sizeof(text), "%s", GREETINGS);

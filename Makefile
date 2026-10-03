@@ -3,7 +3,7 @@
 # Native PS5 title build (eboot.bin + sce_sys, for ShadowMountPlus and the
 # homebrew.page catalog) based on the ps5-native-app-boilerplate tooling:
 # Copyright (C) 2026 BlackBearReloaded, SPDX-License-Identifier: GPL-3.0-or-later.
-# The websrv/elfldr payload build lives in Makefile.payload (make payload).
+# `make native` builds a desktop test binary with the system SDL2.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := app
@@ -55,9 +55,11 @@ RUNTIME_INPUTS := tools/rebuild-libc.sh tools/build-host-tools.sh tools/ninja-bu
 	$(wildcard tooling/native/*.cpp tooling/native/*.hpp) \
 	$(wildcard tooling/native/runtime/*.txt)
 XMP_PS5 := deps/ps5/lib/libxmp-lite.a
+XMP_NATIVE := deps/native/lib/libxmp-lite.a
+VERSION_H := src/version.h
 
 .PHONY: all app build init doctor deps pacbrew pacbrew-list assets-check libc ffpkg ffpfsc packages deploy undeploy \
-	payload native assets upload music-folder clean distclean help
+	native version assets upload music-folder clean distclean help
 
 all: app
 build: app
@@ -99,7 +101,13 @@ $(RUNTIME): $(RUNTIME_INPUTS)
 	@printf '%s\n' '==> [libc] Generating the missing or outdated runtime'
 	@bash tools/rebuild-libc.sh
 
-app: $(RUNTIME) $(XMP_PS5)
+# src/version.h carries contentVersion from sce_sys/param.json (shown in the app).
+$(VERSION_H): sce_sys/param.json
+	@python3 -c 'import json; v=json.load(open("sce_sys/param.json"))["contentVersion"]; open("$(VERSION_H)","w").write("/* Generated from sce_sys/param.json by make. Do not edit. */\n#ifndef VERSION_H\n#define VERSION_H\n#define OLISE_VERSION \"%s\"\n#endif\n" % v); print("==> [version]", v)'
+
+version: $(VERSION_H)
+
+app: $(RUNTIME) $(XMP_PS5) $(VERSION_H)
 	@printf '%s\n' '==> [app] Compiling, linking, signing, and assembling the app folder'
 	@bash tools/build.sh Folder
 	@$(MAKE) --no-print-directory music-folder
@@ -142,12 +150,15 @@ upload: app
 	@echo "remote eboot.bin sha256: $$(curl -sS -f "ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/eboot.bin" | sha256sum | cut -c1-16)"
 UPLOAD_PORT ?= 1337
 
-# --- websrv / elfldr payload build and desktop build (Makefile.payload) ----
-payload:
-	@$(MAKE) -f Makefile.payload
+# --- Desktop test build (needs libsdl2-dev; plays files from music/) -------
+DESKTOP_SRCS := $(filter-out src/heap_native.c src/compat_native.c src/netxm.c,$(wildcard src/*.cpp))
+NATIVE_CXXFLAGS := -O2 -Wall -std=c++17 -I$(dir $(XMP_NATIVE))../include/libxmp-lite $(shell sdl2-config --cflags)
+native: $(VERSION_H) $(XMP_NATIVE)
+	gcc -O2 -Wall -c src/netxm.c -o build/netxm-desktop.o
+	g++ $(NATIVE_CXXFLAGS) -o OliSePlayer-native $(DESKTOP_SRCS) build/netxm-desktop.o \
+		$(XMP_NATIVE) $(shell sdl2-config --libs) -lm
 
-native:
-	@$(MAKE) -f Makefile.payload native
+$(XMP_NATIVE): $(XMP_PS5)
 
 # Regenerate the logo header and the icon (needs python3-pil).
 assets:
@@ -157,8 +168,7 @@ assets:
 clean:
 	@printf '%s\n' '==> [clean] Removing generated build outputs'
 	@rm -rf -- build dist
-	@rm -f -- $(RUNTIME)
-	@$(MAKE) -f Makefile.payload clean
+	@rm -f -- $(RUNTIME) $(VERSION_H) OliSePlayer-native
 
 distclean: clean
 	@printf '%s\n' '==> [distclean] Removing downloaded dependency caches'
@@ -170,7 +180,6 @@ help:
 	  'make deps            Build libxmp-lite and fetch the SDK and PacBrew (sdl2)' \
 	  'make ffpfsc          Also build the compressed .ffpfsc image' \
 	  'make upload          Build and copy the folder to the PS5 over FTP (port 1337)' \
-	  'make payload         Build the websrv/elfldr eboot.elf (Makefile.payload)' \
 	  'make native          Build the desktop test binary' \
 	  'make assets          Regenerate logo header and icon' \
 	  'make doctor          Check the host toolchain' \

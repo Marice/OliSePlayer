@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- The version number (`contentVersion`) is shown next to the logo.
+
+### Removed
+- The websrv/elfldr payload build and `OliSePlayer.zip`; the native title is
+  the only supported way to run OliSe Player.
+- The L2 + R2 quit combination; close the app with the PS button.
+
 ## [01.000.001] - 2026-10-03
 
 ### Fixed
