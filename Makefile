@@ -126,9 +126,12 @@ undeploy:
 # Plain curl upload of dist/<TITLE_ID>/ to /data/homebrew/<TITLE_ID>/ (etaHEN FTP on 1337).
 upload: app
 	@printf '%s\n' '==> [upload] Copying dist/$(TITLE_ID) to ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/'
-	@cd dist/$(TITLE_ID) && find . -type f | while read -r f; do \
-		curl -s --ftp-create-dirs -T "$$f" "ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/$${f#./}" || exit 1; \
+	@for f in $$(cd dist/$(TITLE_ID) && find . -type f); do \
+		curl -sS -f --ftp-create-dirs -T "dist/$(TITLE_ID)/$$f" "ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/$${f#./}" \
+			|| { echo "upload of $$f failed"; exit 1; }; \
 	done; echo "uploaded"
+	@echo "local  eboot.bin sha256: $$(sha256sum dist/$(TITLE_ID)/eboot.bin | cut -c1-16)"
+	@echo "remote eboot.bin sha256: $$(curl -sS -f "ftp://$(PS5_HOST):$(UPLOAD_PORT)/data/homebrew/$(TITLE_ID)/eboot.bin" | sha256sum | cut -c1-16)"
 UPLOAD_PORT ?= 1337
 
 # --- websrv / elfldr payload build and desktop build (Makefile.payload) ----
