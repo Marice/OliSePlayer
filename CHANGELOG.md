@@ -12,11 +12,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the homebrew.page catalog. Uses the ps5-native-app-boilerplate tooling.
 - `make upload` copies the title folder to the console over FTP.
 - `LICENSE` (GPL-3.0-or-later) and `THIRD_PARTY_NOTICES.md`.
+- A dedication to Olivier and Elise shows as a notification at start-up.
+- Error notifications on the PS5 when start-up fails (display, audio, player).
 
 ### Changed
 - The websrv/elfldr payload build moved to `Makefile.payload` (`make payload`).
 - Local file list and track history no longer use the C++ standard library
   containers, so the native build links without libc++.
+- The native title draws through libSceVideoOut (tiled 1080p buffers) instead
+  of SDL's video driver, which does not run inside the title sandbox; SDL is
+  still used for audio and the controller. The title also carries its own
+  mmap-based heap because the sandbox libc heap is too small for 1080p
+  framebuffers and multi-megabyte modules.
 
 ## [v0.1.0] - 2026-10-02
 

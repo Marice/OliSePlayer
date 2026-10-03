@@ -25,7 +25,7 @@ CFLAGS   := -Wall -O2 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
 CXXFLAGS := -Wall -O2 -std=c++17 -DOLISE_NET $(SDL_CFLAGS) -I$(XMP_PS5)/include/libxmp-lite
 LDLIBS   := $(XMP_PS5)/lib/libxmp-lite.a $(SDL_LIBS) -lSceNet -lSceSsl -lSceHttp2
 
-CXX_SRCS := src/main.cpp src/gfx.cpp src/player.cpp src/library.cpp src/radio.cpp src/effects.cpp src/ui.cpp
+CXX_SRCS := src/main.cpp src/gfx.cpp src/player.cpp src/library.cpp src/radio.cpp src/effects.cpp src/ui.cpp src/dbg.cpp src/display_sdl.cpp
 C_SRCS   := src/netxm.c
 OBJS     := $(CXX_SRCS:src/%.cpp=%.o) $(C_SRCS:src/%.c=%.o)
 HEADERS  := $(wildcard src/*.h)

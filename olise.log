@@ -1,0 +1,22 @@
+start (argc=1)
+main ready
+hints set
+sdl core ok
+sdl timer ok
+sdl events ok
+sdl[6/3] Created renderer: software
+display ok
+sdl[7/2] Using udev for HIDAPI joystick device discovery
+sdl[1/2] Failed loading udev_device_get_action: /lib/x86_64-linux-gnu/libSDL2-2.0.so.0: undefined symbol: _udev_device_get_action
+sdl[7/2] Using udev for joystick device discovery
+sdl joystick ok
+sdl audio ok
+sdl[1/2] There are 0 joysticks available
+joystick not found
+app dir '.'
+player ok
+library ok (4 files)
+sdl[1/2] setpriority() failed
+first frame presented
+sdl[1/2] Invalid audio device ID
+sdl[1/2] Invalid audio device ID

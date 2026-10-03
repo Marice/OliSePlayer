@@ -10,6 +10,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "dbg.h"
+#include "display.h"
 #include "effects.h"
 #include "gfx.h"
 #include "library.h"
@@ -318,46 +320,58 @@ static void app_dir(const char* argv0, char* out, size_t n)
 	out[len] = 0;
 }
 
+/* Keep a fatal error on screen long enough to read before the title exits. */
+static int fatal(const char* what)
+{
+	dbg_error("%s: %s", what, SDL_GetError());
+	SDL_Delay(4000);
+	return 1;
+}
+
 int main(int argc, char** argv)
 {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) {
-		fprintf(stderr, "Failed SDL_Init: %s\n", SDL_GetError());
+	dbg_checkpoint("start (argc=%d)", argc);
+	SDL_SetMainReady();
+	dbg_checkpoint("main ready");
+	SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "software");
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+	dbg_checkpoint("hints set");
+	/* Initialise the SDL subsystems one at a time so a failing one is named. */
+	if (SDL_Init(0) != 0) return fatal("SDL core init failed");
+	dbg_checkpoint("sdl core ok");
+	if (SDL_InitSubSystem(SDL_INIT_TIMER) != 0) return fatal("SDL timer init failed");
+	dbg_checkpoint("sdl timer ok");
+	if (SDL_InitSubSystem(SDL_INIT_EVENTS) != 0) return fatal("SDL events init failed");
+	dbg_checkpoint("sdl events ok");
+	/* Display: SDL window on the desktop/payload, direct VideoOut in the title. */
+	char derr[160];
+	if (!display_init(derr, sizeof(derr))) {
+		dbg_error("%s", derr);
+		SDL_Delay(4000);
 		return 1;
 	}
-	SDL_Window* window = SDL_CreateWindow("OliSe Player", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-	                                      gfx::W * 2, gfx::H * 2, SDL_WINDOW_FULLSCREEN_DESKTOP);
-	if (!window) {
-		fprintf(stderr, "Failed CreateWindow: %s\n", SDL_GetError());
-		return 1;
-	}
-	SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, gfx::W, gfx::H);
-	if (!renderer || !texture) {
-		fprintf(stderr, "Failed renderer/texture: %s\n", SDL_GetError());
-		return 1;
-	}
-	int out_w = 0, out_h = 0;
-	SDL_GetRendererOutputSize(renderer, &out_w, &out_h);
-	if (out_h <= 0) out_h = 1080;
-	SDL_Texture* scanlines = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, 1, out_h);
-	if (scanlines) {
-		uint32_t* rows = (uint32_t*)malloc(out_h * sizeof(uint32_t));
-		for (int i = 0; i < out_h; i++) rows[i] = (i % 3 == 2) ? 0x50000000 : 0x00000000;
-		SDL_UpdateTexture(scanlines, NULL, rows, sizeof(uint32_t));
-		free(rows);
-		SDL_SetTextureBlendMode(scanlines, SDL_BLENDMODE_BLEND);
-	}
+	dbg_checkpoint("display ok");
+	if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) != 0) dbg_error("joystick init failed: %s", SDL_GetError());
+	else dbg_checkpoint("sdl joystick ok");
+	if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) dbg_error("audio init failed: %s", SDL_GetError());
+	else dbg_checkpoint("sdl audio ok");
 	SDL_Joystick* joy = SDL_JoystickOpen(0);
+	dbg_checkpoint("joystick %s", joy ? "opened" : "not found");
 
-	App a;
+	/* App holds a few hundred KB of tables; keep it off the (small) main stack. */
+	App* app = new App();
+	App& a = *app;
 	app_dir(argc > 0 ? argv[0] : nullptr, a.appdir, sizeof(a.appdir));
 #ifdef OLISE_NATIVE
 	/* Native title: the app folder is mounted read-only at /app0. */
 	if (!a.appdir[0]) strncpy(a.appdir, "/app0", sizeof(a.appdir) - 1);
 #endif
 	fx::init((unsigned)time(NULL));
-	if (!a.player.init()) fprintf(stderr, "player init failed, continuing without audio\n");
+	dbg_checkpoint("app dir '%s'", a.appdir);
+	if (!a.player.init()) dbg_error("player init failed, continuing without audio: %s", SDL_GetError());
+	else dbg_checkpoint("player ok");
 	a.library.scan(a.appdir);
+	dbg_checkpoint("library ok (%d files)", a.library.count());
 
 	/* Start: a local file if there is one, and kick off the radio. */
 	if (a.library.count() > 0) play_local(a, 0);
@@ -475,26 +489,20 @@ int main(int argc, char** argv)
 		if (a.picker) ui::station_picker(a.picker_sel, a.picker_first, a.radio.station());
 		if (a.help) ui::help_overlay();
 
-		SDL_UpdateTexture(texture, NULL, gfx::fb, gfx::W * sizeof(uint32_t));
-		SDL_RenderClear(renderer);
-		SDL_RenderCopy(renderer, texture, NULL, NULL);
-		if (a.crt && scanlines) SDL_RenderCopy(renderer, scanlines, NULL, NULL);
 		if (shot_path && a.frame == shot_frame) {
-			SDL_Surface* shot = SDL_CreateRGBSurfaceWithFormat(0, gfx::W, gfx::H, 32, SDL_PIXELFORMAT_ARGB8888);
-			if (shot) {
-				memcpy(shot->pixels, gfx::fb, sizeof(gfx::fb));
-				SDL_SaveBMP(shot, shot_path);
-				SDL_FreeSurface(shot);
-				fprintf(stderr, "screenshot saved to %s\n", shot_path);
-			}
+			if (display_screenshot(gfx::fb, shot_path)) fprintf(stderr, "screenshot saved to %s\n", shot_path);
 			running = false;
 		}
-		SDL_RenderPresent(renderer);
+		display_present(gfx::fb, a.crt);
 
+		if (a.frame == 0) {
+			dbg_checkpoint("first frame presented");
+			dbg_toast("Dedicated to my children, Olivier & Elise");
+		}
 		a.frame++;
 		fps_frames++;
 		if (now - fps_t0 >= 10000) {
-			fprintf(stderr, "fps: %.1f\n", fps_frames * 1000.f / (now - fps_t0));
+			dbg_log("fps: %.1f", fps_frames * 1000.f / (now - fps_t0));
 			fps_t0 = now;
 			fps_frames = 0;
 		}
@@ -511,11 +519,16 @@ int main(int argc, char** argv)
 	}
 
 	a.player.shutdown();
-	if (scanlines) SDL_DestroyTexture(scanlines);
-	SDL_DestroyTexture(texture);
-	SDL_DestroyRenderer(renderer);
-	SDL_DestroyWindow(window);
+#ifdef OLISE_NATIVE
+	/* Returning from main crashes the title launch context (boilerplate note):
+	   leave the last frame up and let the user close the app from the PS menu. */
+	dbg_toast("music stopped, close the app with the PS button");
+	for (;;) SDL_Delay(1000);
+#else
+	display_shutdown();
 	if (joy) SDL_JoystickClose(joy);
 	SDL_Quit();
+	delete app;
 	return 0;
+#endif
 }
