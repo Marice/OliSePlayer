@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [01.000.002] - 2026-10-03
+
 ### Added
 - The version number (`contentVersion`) is shown next to the logo.
 
