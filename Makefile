@@ -109,7 +109,7 @@ XMP_PS5 := deps/ps5/lib/libxmp-lite.a
 XMP_NATIVE := deps/native/lib/libxmp-lite.a
 VERSION_H := src/version.h
 
-.PHONY: all app gl gl-runtime presets presets-folder presets-zip build init doctor deps pacbrew pacbrew-list assets-check libc ffpkg ffpfsc packages deploy undeploy \
+.PHONY: all app gl gl-runtime presets presets-folder presets-zip app-zip build init doctor deps pacbrew pacbrew-list assets-check libc ffpkg ffpfsc packages deploy undeploy \
 	native version assets upload music-folder clean distclean help
 
 all: app
@@ -165,7 +165,7 @@ version: $(VERSION_H)
 app: $(RUNTIME) $(XMP_PS5) $(VERSION_H)
 	@printf '%s\n' '==> [app] Compiling, linking, signing, and assembling the app folder'
 	@bash tools/build.sh Folder
-	@$(MAKE) --no-print-directory music-folder
+	@$(MAKE) --no-print-directory music-folder app-zip
 
 # OpenGL build: same app, rendered through EGL instead of VideoOut.
 gl: $(RUNTIME) $(XMP_PS5) $(VERSION_H) gl-runtime
@@ -183,7 +183,7 @@ gl: $(RUNTIME) $(XMP_PS5) $(VERSION_H) gl-runtime
 	 APP_UNDEFINED_SYMBOLS="ps5_agc_gate2_run" \
 	 APP_LIBRARY_PATHS="$(PS5_PAYLOAD_SDK)/target/lib" \
 	 bash tools/build.sh Folder
-	@$(MAKE) --no-print-directory music-folder presets-folder
+	@$(MAKE) --no-print-directory music-folder presets-folder app-zip
 	@printf '==> [gl] eboot.bin is %s bytes\n' "$$(stat -c%s dist/$(TITLE_ID)/eboot.bin)"
 
 # The payload SDK archives under names tools/build.sh accepts, plus the two
@@ -250,13 +250,17 @@ presets-zip: presets-folder
 music-folder:
 	@mkdir -p dist/$(TITLE_ID)/music
 	@cp music/README.txt dist/$(TITLE_ID)/music/README.txt
-	@if ls music/*.mod music/*.xm music/*.s3m music/*.it >/dev/null 2>&1; then \
-		cp -u music/*.mod music/*.xm music/*.s3m music/*.it dist/$(TITLE_ID)/music/ 2>/dev/null; \
-	fi
-	@(cd dist/$(TITLE_ID)/music && ls -1 *.mod *.xm *.s3m *.it 2>/dev/null > index.txt; true)
-	@printf '==> [music] %s module(s) indexed\n' "$$(grep -c . dist/$(TITLE_ID)/music/index.txt 2>/dev/null || echo 0)" 
+	@rm -f dist/$(TITLE_ID)/music/*.mod dist/$(TITLE_ID)/music/*.xm \
+		dist/$(TITLE_ID)/music/*.s3m dist/$(TITLE_ID)/music/*.it 2>/dev/null; true
+	@: > dist/$(TITLE_ID)/music/index.txt
+	@printf '%s\n' '==> [music] Empty music/ with a note; the modules in music/ are test files'
+
+# The zip is what gets installed, so it is built last, after the music note and
+# the presets are in place. Modules are not shipped: they are test material and
+# the user puts their own in music/, listing them in music/index.txt.
+app-zip:
 	@cd dist && rm -f $(TITLE_ID).zip && python3 -m zipfile -c $(TITLE_ID).zip $(TITLE_ID)
-	@printf '%s\n' '==> [music] Added music/README.txt to the app folder and zip'
+	@printf '==> [zip] dist/$(TITLE_ID).zip (%s)\n' "$$(du -h dist/$(TITLE_ID).zip | cut -f1)"
 
 ffpkg: $(RUNTIME) $(XMP_PS5)
 	@printf '%s\n' '==> [ffpkg] Building the app folder and UFS2 image'

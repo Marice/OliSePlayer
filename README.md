@@ -57,10 +57,11 @@ playing. Without the pack the app falls back to its own effect, which works
 the same way MilkDrop does (warp the previous frame, dim it, draw the
 waveform over it) but with 24 built-in presets instead of 552.
 
-The presets are not kept in this repository, but they are attached to each
-release as `OliSePlayer-presets.zip`: unpack it into the app folder next to
-`eboot.bin`. `make presets` fetches them from the projectM project instead,
-and `make gl` ships whatever ends up in `presets/`.
+The presets ship inside `PPSA01153.zip`, so an install has them straight
+away. They are also attached to each release on their own as
+`OliSePlayer-presets.zip`, for adding them to an install that has none.
+`make presets` fetches them from the projectM project, and `make gl` ships
+whatever ends up in `presets/`.
 
 The pack carries projectM's own statement on their licence, which comes down
 to this: almost no MilkDrop preset was released under a specific licence, and

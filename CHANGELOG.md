@@ -6,6 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [02.000.001] - 2026-10-07
+
+### Changed
+- `PPSA01153.zip` now carries the MilkDrop presets, so an install from a store
+  has them straight away. The zip is built after the presets are in place;
+  before this it was written first and they never made it in.
+- The test modules are no longer shipped. `music/` holds a note and an empty
+  `index.txt` for the user's own files.
+
 ## [02.000.000] - 2026-10-07
 
 OliSe Player now renders through OpenGL and plays the original MilkDrop
