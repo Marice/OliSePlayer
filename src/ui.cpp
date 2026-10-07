@@ -175,7 +175,7 @@ void info_panel(const TrackInfo& ti, const Snapshot& s, const char* detail, int 
 	if (!ti.loaded) {
 		gfx::text(tx, ty, "NO MODULE", gfx::TEXT_DIM);
 		gfx::text(tx, ty + 10, "R3: RANDOM TRACK FROM THE MOD ARCHIVE", gfx::TEXT);
-		gfx::text(tx, ty + 20, "TRIANGLE: PICK A STATION / GENRE", gfx::TEXT);
+		gfx::text(tx, ty + 20, "SQUARE: VISUALISER   TRIANGLE: GENRES", gfx::TEXT);
 		gfx::text(tx, ty + 30, "CIRCLE: LOCAL FILES", gfx::TEXT);
 		return;
 	}
@@ -329,6 +329,9 @@ void file_browser(const Library& lib, int sel, int first)
 	int lines = (h - 48) / 10;
 	if (lib.count() == 0) {
 		gfx::text(x + 14, y + 24, "NO FILES. PUT .MOD .XM .S3M .IT IN music/", gfx::TEXT_DIM);
+		/* Show what the scan actually saw, so a wrong folder is visible here
+		   instead of only in a log nobody can read on the console. */
+		gfx::textf(x + 14, y + 36, gfx::TEXT_DARK, "%.56s", lib.report());
 	}
 	for (int i = 0; i < lines && first + i < lib.count(); i++) {
 		int idx = first + i;
@@ -348,11 +351,11 @@ void help_overlay()
 		"R3 ............ NEXT RANDOM TRACK (MOD ARCHIVE)",
 		"L3 ............ PREVIOUS TRACK",
 		"CROSS ......... PAUSE / PLAY",
-		"TRIANGLE ...... STATIONS: GENRES, FORMATS, CHARTS",
+		"TRIANGLE ...... STATIONS  (VISUALISER: PRESET, L2 BACK)",
 		"CIRCLE ........ LOCAL FILE LIST",
 		"L1 / R1 ....... PREVIOUS / NEXT LOCAL FILE",
 		"OPTIONS ....... INSTRUMENTS <-> SCOPES",
-		"SQUARE ........ EFFECTS: FULL / CALM / OFF",
+		"SQUARE ........ VISUALISER: OFF / BEHIND / FULL",
 		"R2 ............ CRT SCANLINES",
 		"D-PAD L/R ..... SCROLL CHANNELS",
 		"D-PAD U/D ..... VOLUME  (HOLD L2: SEEK)",

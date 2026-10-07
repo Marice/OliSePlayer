@@ -14,6 +14,18 @@
 #include "display.h"
 #include "version.h"
 #include "effects.h"
+#ifdef OLISE_GL
+#include <dirent.h>
+#include <errno.h>
+#include <unistd.h>
+
+#include "appdir.h"
+#include "elevation.hpp"
+#include "visualiser.h"
+#ifdef OLISE_PROJECTM
+#include "milkdrop.h"
+#endif
+#endif
 #include "gfx.h"
 #include "library.h"
 #include "player.h"
@@ -59,6 +71,8 @@ struct App {
 	char source_text[48] = "NO SOURCE";
 	bool radio_mode = true;        /* auto-next on track end */
 	int fx_level = 2;              /* 2 full, 1 calm, 0 off */
+	int vis_mode = 0;              /* 0 off, 1 behind the interface, 2 full screen */
+	int vis_preset = 0;
 	bool crt = false;
 	bool show_scopes = false;
 	bool help = false;
@@ -86,6 +100,29 @@ static void show_toast(App& a, const char* l1, const char* l2)
 	strncpy(a.toast1, l1, sizeof(a.toast1) - 1);
 	strncpy(a.toast2, l2 ? l2 : "", sizeof(a.toast2) - 1);
 	a.toast_frames = 4 * FPS;
+}
+
+/* One button for the whole look. Square walks through the demo effects and
+   then the visualiser, so everything that changes how busy the screen is sits
+   on a single key instead of a chord. Without OpenGL the visualiser steps are
+   skipped, which leaves the three effect levels this app always had. */
+static void cycle_look(App& a)
+{
+#ifdef OLISE_GL
+	/* Square is the visualiser button: off, behind the interface, full screen.
+	   The demo effects keep their own level, so the scroller and the starfield
+	   are not disturbed by looking for the visualiser. */
+	if (display_has_gpu()) {
+		a.vis_mode = (a.vis_mode + 1) % 3;
+		if (a.vis_mode == 0) show_toast(a, "VISUALISER", "OFF");
+		else show_toast(a, a.vis_mode == 1 ? "VISUALISER" : "VISUALISER FULL",
+		                vis::preset_name(a.vis_preset));
+		return;
+	}
+#endif
+	/* Without OpenGL there is no visualiser, so the button keeps its old job. */
+	a.fx_level = (a.fx_level + 2) % 3;
+	show_toast(a, "EFFECTS", a.fx_level == 2 ? "FULL" : (a.fx_level == 1 ? "CALM" : "OFF"));
 }
 
 static void on_track_started(App& a)
@@ -259,11 +296,36 @@ static void handle_button(App& a, int b, bool& running)
 	case BTN_L1:       if (a.library.count()) play_local(a, a.library.prev()); break;
 	case BTN_R1:       if (a.library.count()) play_local(a, a.library.next()); break;
 	case BTN_TRIANGLE:
+#ifdef OLISE_GL
+		/* While the visualiser is on, Triangle picks the next preset: that is
+		   what the user is looking at, so that is what the button acts on.
+		   With the visualiser off it opens the genre picker as it always did. */
+		if (a.vis_mode > 0) {
+			/* Held with L2, Triangle jumps back instead of forward: with
+			   hundreds of presets, stepping past the one you wanted is
+			   otherwise a very long way round. */
+			const int delta = a.l2_down ? -1 : 1;
+#ifdef OLISE_PROJECTM
+			if (milkdrop::available()) {
+				/* With hundreds of presets, stepping is for browsing and R2
+				   is for getting somewhere else entirely. */
+				if (a.r2_down) milkdrop::shuffle();
+				else milkdrop::step(delta);
+				show_toast(a, "PRESET", milkdrop::current_name());
+				break;
+			}
+#endif
+			const int n = vis::preset_count();
+			a.vis_preset = (a.vis_preset + (delta > 0 ? 1 : n - 1)) % n;
+			show_toast(a, "PRESET", vis::preset_name(a.vis_preset));
+			break;
+		}
+#endif
 		a.picker = true;
 		a.picker_sel = a.radio.station();
 		break;
 	case BTN_OPTIONS:  a.show_scopes = !a.show_scopes; break;
-	case BTN_SQUARE:   a.fx_level = (a.fx_level + 2) % 3; break;
+	case BTN_SQUARE:   cycle_look(a); break;
 	case BTN_DLEFT:    if (a.ch_offset > 0) a.ch_offset--; break;
 	case BTN_DRIGHT:   a.ch_offset++; break;
 	case BTN_DUP:
@@ -296,6 +358,12 @@ static void handle_key(App& a, SDL_Keycode k, bool& running)
 	case SDLK_g:      handle_button(a, BTN_TRIANGLE, running); break;
 	case SDLK_f:      handle_button(a, BTN_SQUARE, running); break;
 	case SDLK_c:      a.crt = !a.crt; break;
+#ifdef OLISE_GL
+	case SDLK_b:
+		a.vis_preset = (a.vis_preset + 1) % vis::preset_count();
+		show_toast(a, "PRESET", vis::preset_name(a.vis_preset));
+		break;
+#endif
 	case SDLK_LEFT:   handle_button(a, BTN_DLEFT, running); break;
 	case SDLK_RIGHT:  handle_button(a, BTN_DRIGHT, running); break;
 	case SDLK_UP:     handle_button(a, BTN_DUP, running); break;
@@ -369,6 +437,50 @@ int main(int argc, char** argv)
 #endif
 	fx::init((unsigned)time(NULL));
 	dbg_checkpoint("app dir '%s'", a.appdir);
+#ifdef OLISE_GL
+	/* ShadowMountPlus 1.7 lets a sandboxed title open files but refuses to
+	   list a folder (EPERM), which leaves music/ and presets/ unreadable.
+	   The boilerplate's elevation client lifts that: it hands lapy.elf to the
+	   local elfldr on port 9021 and waits until /data lists. Failure is not
+	   fatal, the app simply has no local files then. */
+	{
+		/* etaHEN offers jailbreak-on-demand: a title writes its pid to
+		   /download0/etahen_jailbreak inside its own sandbox, and the daemon
+		   raises that process's credentials and removes the file. That is
+		   what lifts the EPERM on listing folders. */
+		bool elevated = false;
+		FILE* req = fopen("/download0/etahen_jailbreak", "w");
+		if (req) {
+			fprintf(req, "%d", (int)getpid());
+			fclose(req);
+			/* The daemon polls, so give it a moment and check by listing a
+			   folder that was refused before. */
+			for (int i = 0; i < 40 && !elevated; i++) {
+				SDL_Delay(50);
+				DIR* probe = opendir("/data");
+				if (probe) { closedir(probe); elevated = true; }
+			}
+			dbg_log("elevation: etahen request %s after %s",
+			        elevated ? "granted" : "ignored", elevated ? "poll" : "2s");
+		} else {
+			dbg_log("elevation: cannot write /download0/etahen_jailbreak (errno=%d)", errno);
+		}
+
+		if (!elevated) {
+			/* Fall back to the boilerplate client, which sends a helper ELF
+			   to the local elfldr. */
+			char helper[256];
+			snprintf(helper, sizeof(helper), "%s/lapy.elf", app_folder());
+			const elevation::Status st =
+			    elevation::request(elevation::Capability::filesystem, helper);
+			dbg_log("elevation: client status=%u via %s", (unsigned)st, elevation::path());
+			elevated = st == elevation::Status::ok;
+		}
+		if (!elevated) dbg_log("elevation: unavailable, using index.txt for local files");
+	}
+	/* Only now may folders be read, so this is where projectM scans presets. */
+	display_start_visualiser();
+#endif
 	if (!a.player.init()) dbg_error("player init failed, continuing without audio: %s", SDL_GetError());
 	else dbg_checkpoint("player ok");
 	a.library.scan(a.appdir);
@@ -441,8 +553,40 @@ int main(int argc, char** argv)
 		for (int c = 0; c < a.snap.chn; c++) energy += a.snap.ch[c].volume;
 		if (a.snap.chn) energy /= a.snap.chn;
 
+#ifdef OLISE_GL
+		/* The visualiser runs on the GPU behind the interface. In full mode
+		   only the overlays stay on top, so the effect fills the screen. */
+		vis::Frame vf = {};
+		bool vis_on = a.vis_mode > 0 && display_has_gpu();
+		if (vis_on) {
+			a.player.scope(scope_buf, SCOPE_SAMPLES);
+			vf.samples = scope_buf;
+			vf.sample_count = SCOPE_SAMPLES;
+			vf.level = energy > 255 ? 255 : energy;
+			/* A new pattern row is the closest thing a tracker gives us to a
+			   beat, and it lands exactly on the music. */
+			vf.beat = a.snap.row != a.last_row;
+			vf.preset = a.vis_preset;
+			vf.seconds = (float)a.frame / (float)FPS;
+			/* Behind: the interface stays readable over the effect. Full: the
+			   visualiser owns the screen and the player is gone, except while
+			   a toast or the now playing card is up, so changing preset still
+			   tells you what you picked. */
+			/* Full mode draws no interface, so only the toasts remain; 0.95
+			   keeps them bright while the black around them is keyed out. */
+			display_set_visualiser(&vf, a.vis_mode == 2 ? 0.95f : 0.55f);
+		} else {
+			display_set_visualiser(nullptr, 1.0f);
+		}
+#endif
+
 		/* ---- compose the frame ---- */
 		gfx::clear(gfx::BLACK);
+		/* In full visualiser mode the player is not drawn at all: only the
+		   toasts and the now playing card go over the effect, and the black
+		   around them is keyed out by the backend. */
+		const bool draw_ui = a.vis_mode != 2;
+		if (draw_ui) {
 		fx::stars_update(energy);
 		fx::stars_draw(0, ui::PANEL_Y - 2);
 		fx::logo(gfx::W / 2, 50, a.frame, a.fx_level);
@@ -470,6 +614,7 @@ int main(int argc, char** argv)
 		if (a.ch_offset > a.player.info().channels - ui::pattern_channels_visible())
 			a.ch_offset = a.player.info().channels - ui::pattern_channels_visible();
 		if (a.ch_offset < 0) a.ch_offset = 0;
+		} /* draw_ui */
 
 		if (a.radio.state() == RadioState::Loading) ui::loading_badge(a.frame);
 		if (a.card_frames > 0) {
