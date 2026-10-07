@@ -11,7 +11,11 @@
  *     carved out of 2 MiB arenas, recycled through per-class free lists.
  * Every block carries a 16 byte header with its class or mapping size.
  * The desktop build keeps the normal C library heap. */
-#ifdef OLISE_NATIVE
+/* With OLISE_GL the PS5 OpenGL SDK brings its own allocator (native-app/
+ * app_heap.c), which solves the same problem through linker wrapping. Two
+ * allocators cannot both own malloc, and the SDK documents that partial
+ * wrapping is unsafe, so this one steps aside for the OpenGL build. */
+#if defined(OLISE_NATIVE) && !defined(OLISE_GL)
 
 #include <pthread.h>
 #include <stddef.h>

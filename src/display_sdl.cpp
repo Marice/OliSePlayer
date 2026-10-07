@@ -75,6 +75,11 @@ void display_shutdown()
 	g_window = nullptr;
 }
 
+bool display_has_gpu()
+{
+	return false; /* software path: the visualiser needs OpenGL */
+}
+
 bool display_screenshot(const uint32_t* fb, const char* path)
 {
 	SDL_Surface* shot = SDL_CreateRGBSurfaceWithFormat(0, gfx::W, gfx::H, 32, SDL_PIXELFORMAT_ARGB8888);

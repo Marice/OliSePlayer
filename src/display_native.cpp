@@ -1,5 +1,8 @@
-#ifdef OLISE_NATIVE
+#if defined(OLISE_NATIVE) && !defined(OLISE_GL)
 /* VideoOut display backend for the native PS5 title.
+ *
+ * Used when the app is built without OpenGL. With OLISE_GL the frame goes
+ * through EGL in display_gl.cpp instead, which keeps the same interface.
  *
  * SDL's PS5 video driver does not run inside a sandboxed title, so the frame
  * goes straight to libSceVideoOut the way the ps5-native-app-boilerplate
@@ -154,6 +157,11 @@ void display_present(const uint32_t* fb, bool crt)
 void display_shutdown()
 {
 	/* The title keeps its video output until the shell closes the process. */
+}
+
+bool display_has_gpu()
+{
+	return false; /* software path: the visualiser needs OpenGL */
 }
 
 bool display_screenshot(const uint32_t* fb, const char* path)
