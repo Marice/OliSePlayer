@@ -14,3 +14,9 @@
 /build/
 /runtime/libc.prx
 /.env
+deps/ps5-opengl/
+deps/ps5-runtime/
+
+# The MilkDrop preset pack and its textures: 9 MB of other people's work with
+# an unclear licence, fetched by tools/fetch-presets.sh instead of committed.
+/presets/

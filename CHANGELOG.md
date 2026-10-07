@@ -6,6 +6,49 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [02.000.000] - 2026-10-07
+
+OliSe Player now renders through OpenGL and plays the original MilkDrop
+presets.
+
+### Added
+- **MilkDrop visualiser.** The app runs projectM 4.1.8 (LGPL-2.1), so the
+  552 presets of the last official MilkDrop release work as intended, scripts
+  and shaders included. Square cycles the visualiser (off, behind the
+  interface, full screen); Triangle picks the next preset, L2 + Triangle the
+  previous one and R2 + Triangle a random one. The presets are not part of
+  this repository: they are attached to the release as
+  `OliSePlayer-presets.zip`, and `make presets` fetches them from the source.
+  The archive carries projectM's statement on their licence.
+- **Built-in visualiser** with 24 presets over seven warp modes, used when
+  projectM is unavailable or finds no presets, so the app always has an
+  effect to show.
+- **OpenGL rendering** through the PS5 OpenGL SDK (`make gl`). The software
+  renderer still draws the FastTracker II interface; it is uploaded as a
+  texture and composited on the GPU. The plain `make` build keeps rendering
+  straight to VideoOut.
+- `index.txt` in `music/` and `presets/`, written at build time. A title
+  sandbox may open a file but not list a folder, so the app falls back to
+  this index when its own directory scan is refused.
+- The app writes `olise.log` next to itself: in a native title stderr goes
+  nowhere, and this is what made the sandbox problems diagnosable.
+
+### Changed
+- The title is registered as a game (`applicationCategoryType` 0) instead of
+  a media app. Media titles get a stricter sandbox on this firmware.
+- Local modules are found through the app folder, located by looking for the
+  app's own `eboot.bin` the way ProsperoStore does, rather than by deriving a
+  path from `argv[0]`, which a native title does not provide.
+- Square only drives the visualiser now; the demo effects keep their level
+  instead of cycling along with it.
+
+### Fixed
+- Local modules in `music/` were never found on the console.
+
+### Known limitation
+- Adding files without rebuilding means editing `index.txt` by hand: the
+  sandbox refuses to list a folder, so the app cannot discover them itself.
+
 ## [01.000.002] - 2026-10-03
 
 ### Added

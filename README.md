@@ -33,19 +33,40 @@ Press the touchpad for this list on screen.
 |---|---|
 | R3 | Next track |
 | L3 | Previous track |
-| Triangle | Choose a station: random, featured, top rated, a format or a genre |
+| Triangle | Choose a station, or the next preset while the visualiser runs |
+| L2 + Triangle | Previous preset (R2 + Triangle picks a random one) |
 | Cross | Pause / play |
 | Circle | Browse the local `music/` folder |
 | L1 / R1 | Previous / next local file (page up / down in lists) |
 | Options | Switch the right panel between instruments and scopes |
-| Square | Effects: full, calm, off |
+| Square | Visualiser: off, behind the interface, full screen |
 | R2 | CRT scanlines on / off |
 | D-pad left / right | Scroll through the channels |
 | D-pad up / down | Volume (hold L2 to jump through the song) |
 
 On the desktop build: `n` / `p` next and previous, `g` stations, space
-pause, `o` file list, `s` scopes, `f` effects, `c` CRT, arrows for channels
-and volume, `h` help, Esc quits.
+pause, `o` file list, `s` scopes, `f` effects, `c` CRT, `b` next preset,
+arrows for channels and volume, `h` help, Esc quits.
+
+## The visualiser
+
+Square turns on a MilkDrop visualiser. With the preset pack installed those
+are the real presets from the last official MilkDrop release, run by
+projectM: the same scripts and shaders, reacting to the module that is
+playing. Without the pack the app falls back to its own effect, which works
+the same way MilkDrop does (warp the previous frame, dim it, draw the
+waveform over it) but with 24 built-in presets instead of 552.
+
+The presets are not kept in this repository, but they are attached to each
+release as `OliSePlayer-presets.zip`: unpack it into the app folder next to
+`eboot.bin`. `make presets` fetches them from the projectM project instead,
+and `make gl` ships whatever ends up in `presets/`.
+
+The pack carries projectM's own statement on their licence, which comes down
+to this: almost no MilkDrop preset was released under a specific licence, and
+after two decades of free circulation they are treated as public domain. A
+preset author who objects can have theirs removed; see
+`presets/PRESETS-LICENSE.md`.
 
 ## Where the music comes from
 
@@ -67,7 +88,9 @@ Payload SDK and the PacBrew ports (about 350 MB) into `.deps/`.
 
 ```sh
 make deps        # libxmp-lite, SDK and PacBrew
+make presets     # download the MilkDrop preset pack (optional)
 make             # dist/PPSA01153/ and dist/PPSA01153.zip
+make gl          # the OpenGL build, needed for the visualiser
 make ffpfsc      # also a compressed .ffpfsc image
 make upload      # copy the folder to the PS5 over FTP (port 1337)
 make native      # desktop version, plays files from music/
@@ -81,6 +104,19 @@ The native title build uses the tooling from BlackBearReloaded's
 it links with LLVM, converts the ELF to a PS5 module, signs it as a
 development FSELF and adds a source-built `libc.prx`. See
 `THIRD_PARTY_NOTICES.md` for all licenses.
+
+`make gl` needs two things the plain build does not:
+
+- The [PS5 OpenGL SDK](https://github.com/blackbearreloaded/ps5-opengl),
+  unpacked so that `deps/ps5-opengl/sdk/include/EGL` exists, or pointed at
+  with `make gl PS5_OPENGL_PREFIX=/path/to/sdk`.
+- projectM built for the PS5 in `deps/projectm/`, for the real MilkDrop
+  presets. Without it the app uses its own visualiser instead, and `make gl`
+  says nothing about it. `docs/decision-log.md` records how projectM was
+  ported, including the three changes its build needed.
+
+The OpenGL build is about 27 MB against 2.6 MB for the plain one: Mesa is
+linked statically, and that is the price of running shaders at all.
 
 `make assets` regenerates the logo and the icon with the Python scripts in
 `tools/` (needs Pillow). `tools/netxm_test.c` tests the page parsing
