@@ -6,6 +6,10 @@
 #include <string.h>
 
 #ifdef OLISE_NATIVE
+#include "appdir.h"
+#endif
+
+#ifdef OLISE_NATIVE
 extern "C" int sceKernelSendNotificationRequest(uint32_t device, void* request, size_t size, int blocking);
 
 /* Layout used by the ps5-native-app-boilerplate: 45 reserved bytes, then text. */
@@ -24,6 +28,24 @@ static void vformat(char* out, size_t n, const char* fmt, va_list ap)
 static void write_log(const char* line)
 {
 	fprintf(stderr, "%s\n", line);
+#ifdef OLISE_NATIVE
+	/* stderr goes nowhere in a native title, so the same lines also land in a
+	   file next to the app. That folder is writable (ShadowMount mounts it
+	   from /data/homebrew), and it is the only way to read a diagnosis back
+	   over FTP instead of copying it off the screen by hand. */
+	static FILE* file = nullptr;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		char path[192];
+		snprintf(path, sizeof(path), "%s/olise.log", app_folder());
+		file = fopen(path, "w");
+	}
+	if (file) {
+		fprintf(file, "%s\n", line);
+		fflush(file); /* a crash must not take the last lines with it */
+	}
+#endif
 }
 
 static void show_toast(const char* text)
@@ -65,6 +87,12 @@ void dbg_checkpoint(const char* fmt, ...)
 	vformat(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
 	write_log(buf);
+#ifdef OLISE_TRACE_STARTUP
+	/* Startup tracing: stderr goes nowhere in a native title, so every
+	   checkpoint becomes a notification. The last one on screen is the step
+	   before the crash. Built with `make gl TRACE=1`; never in a release. */
+	show_toast(buf);
+#endif
 }
 
 void dbg_error(const char* fmt, ...)

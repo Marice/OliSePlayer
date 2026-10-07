@@ -19,6 +19,8 @@ public:
 	int next() { return count() ? (current_ = (current_ + 1) % count()) : -1; }
 	int prev() { return count() ? (current_ = (current_ + count() - 1) % count()) : -1; }
 	const char* folder() const { return folder_; }
+	/* What the last scan found per directory, for the empty-list message. */
+	const char* report() const { return report_; }
 
 private:
 	struct Entry {
@@ -26,9 +28,13 @@ private:
 		char path[LIBRARY_PATH];
 	};
 	void scan_dir(const char* dir);
+	/* Fallback for sandboxes that refuse opendir: read index.txt. */
+	void read_index(const char* dir);
 	Entry files_[LIBRARY_MAX];
 	int count_ = 0;
 	char folder_[LIBRARY_PATH] = {0};
+	char report_[192] = {0};
+	int report_len_ = 0;
 	int current_ = 0;
 };
 
