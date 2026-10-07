@@ -143,6 +143,26 @@ for symbol in ${APP_WRAP_SYMBOLS:-}; do
     wrap_options+=("--wrap=$symbol")
 done
 
+# Directories the linker searches for libraries named inside an input, such as
+# the "pthread" dependent library specifier embedded in the SDK's libc++.a.
+search_options=()
+for path in ${APP_LIBRARY_PATHS:-}; do
+    [[ $path =~ ^[A-Za-z0-9_./-]+$ && -d $path ]] || {
+        echo "invalid library path: $path" >&2; exit 2;
+    }
+    search_options+=(-L "$path")
+done
+
+# Symbols the linker must keep even when nothing references them by name.
+# The PS5 OpenGL SDK needs its GPU gate pulled in this way.
+undefine_options=()
+for symbol in ${APP_UNDEFINED_SYMBOLS:-}; do
+    [[ $symbol =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+        echo "invalid undefined symbol: $symbol" >&2; exit 2;
+    }
+    undefine_options+=(-u "$symbol")
+done
+
 pacbrew_cflags=()
 pacbrew_libs=()
 if (( ${#pacbrew_packages[@]} > 0 || ${#pacbrew_includes[@]} > 0 || ${#pacbrew_archives[@]} > 0 )); then
@@ -217,8 +237,11 @@ for name in app_crt app_cpp_runtime; do
 done
 
 link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}")
+# .so inputs are link stubs that resolve system imports at link time, not
+# shared objects shipped with the app; the PS5 OpenGL SDK provides its GPU
+# libraries that way.
 for archive in "${archives[@]}"; do
-    [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.a$ && -f $root/$archive ]] || {
+    [[ $archive =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.(a|so)$ && -f $root/$archive ]] || {
         echo "invalid static archive: $archive" >&2; exit 2;
     }
     link_inputs+=("$root/$archive")
@@ -237,7 +260,7 @@ if [[ -n ${pacbrew_root:-} ]]; then
     done < <(find "$pacbrew_root" -type f \( -name '*.a' -o -name '*.so' \) -print0 | sort -z)
 fi
 ninja_edge LINK "$build/llvm-pie.elf" "$sdk_root/bin/prospero-lld" -T "$native/ps5-pie.ld" --eh-frame-hdr \
-    "${wrap_options[@]}" --version-script "$native/app-symbols.map" \
+    "${wrap_options[@]}" "${undefine_options[@]}" "${search_options[@]}" --version-script "$native/app-symbols.map" \
     -e _start -o "$build/llvm-pie.elf" "${link_inputs[@]}" \
     --as-needed "$sdk_root"/target/lib/*.so
 ninja_inputs=("$build/llvm-pie.elf" "$tool" "$sdk_root"/target/lib/*.so)

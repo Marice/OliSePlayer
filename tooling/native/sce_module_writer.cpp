@@ -727,6 +727,17 @@ Bytes write_executable(const Image &image, std::span<const Stub> stubs, const Op
                 break;
             }
         }
+        // A weak undefined symbol is allowed to stay unresolved: the caller
+        // tests it against null before use. The PS5 OpenGL SDK relies on this
+        // for the TLS wrapper _ZTH23_mesa_glapi_tls_Context, which only its
+        // C++ objects reference while the C ones use emulated TLS. Importing
+        // it is impossible (no module exports it) and refusing it would reject
+        // a program the ordinary linker accepts, so skip it instead.
+        constexpr int kWeakBinding = 2;
+        if (provider == nullptr && symbol.binding() == kWeakBinding)
+        {
+            continue;
+        }
         require(provider != nullptr, "no public SDK stub exports required symbol " + symbol.name);
         imports.push_back({symbol.name, provider, 0, 0, static_cast<std::uint32_t>(i), {}});
     }

@@ -26,10 +26,19 @@ SECTIONS {
         *(.plt .plt.*)
     } : text
 
+    /* The bounds let libunwind find the unwind tables without
+       dl_iterate_phdr, which this target does not provide. PROVIDE keeps the
+       symbols out of the way when nothing refers to them. */
     .eh_frame_hdr : ALIGN(CONSTANT(MAXPAGESIZE)) {
+        PROVIDE_HIDDEN(__eh_frame_hdr_start = .);
         KEEP(*(.eh_frame_hdr))
+        PROVIDE_HIDDEN(__eh_frame_hdr_end = .);
     } : ro
-    .eh_frame : { KEEP(*(.eh_frame)) } : ro
+    .eh_frame : {
+        PROVIDE_HIDDEN(__eh_frame_start = .);
+        KEEP(*(.eh_frame))
+        PROVIDE_HIDDEN(__eh_frame_end = .);
+    } : ro
     .gcc_except_table : { *(.gcc_except_table .gcc_except_table.*) } : ro
     .rodata : { *(.rodata .rodata.*) } : ro
 
