@@ -17,6 +17,13 @@
 #define URL_GENRE    "http://modarchive.org/index.php?request=search&search_type=genre&query=%d"
 #define URL_CHART    "http://modarchive.org/index.php?request=view_chart&query=%s"
 #define URL_DOWNLOAD "http://api.modarchive.org/downloads.php?moduleid=%ld"
+/* Modland: playlists are plain text, one absolute URL per track. They point at
+   a mirror that is often slow or down, so the host is rewritten to the main
+   server before downloading. */
+#define URL_PLAYLIST "http://ftp.modland.com/pub/playlists/%s.m3u"
+#define MODLAND_MIRROR "http://ftp.amigascne.org/mirrors/ftp.modland.com"
+#define MODLAND_HOST   "http://ftp.modland.com"
+#define PLAYLIST_CAP (512u * 1024u)
 #define USER_AGENT   "OliSePlayer/1.0 (PS5 homebrew)"
 #define PAGE_CAP     (2u * 1024u * 1024u)
 #define MODULE_CAP   (16u * 1024u * 1024u)
@@ -441,6 +448,90 @@ static int fetch_listing(const char* url_base, int genre_id, int fmt_idx, NetxmR
 	return rc;
 }
 
+/* Picks a random supported module out of a Modland playlist and downloads it.
+   A playlist is at most a few hundred kilobytes, so it is read whole and the
+   usable lines are counted; reservoir sampling then picks one without keeping
+   the line numbers around. */
+static int fetch_playlist(const NetxmRequest* req, NetxmResult* out)
+{
+	char url[256];
+	uint8_t* text = NULL;
+	size_t len = 0;
+
+	snprintf(url, sizeof(url), URL_PLAYLIST, req->playlist ? req->playlist : "favourites_by_coma");
+	if (http_get(url, &text, &len, PLAYLIST_CAP) != 0 || !text || len == 0) {
+		free(text);
+		fprintf(stderr, "netxm: playlist %s unavailable\n", url);
+		return -2;
+	}
+
+	const int want = format_index(req->format);   /* -1 = any supported */
+	char chosen[512] = {0};
+	int seen = 0;
+
+	char* save = NULL;
+	for (char* line = strtok_r((char*)text, "\r\n", &save); line;
+	     line = strtok_r(NULL, "\r\n", &save)) {
+		if (line[0] == '#' || line[0] == 0) continue;      /* M3U comment */
+		if (strncmp(line, "http://", 7) != 0) continue;
+
+		char ext[8];
+		extension_of(line, ext, sizeof(ext));
+		if (!format_supported(ext)) continue;
+		if (want >= 0 && strcmp(ext, SUPPORTED[want]) != 0) continue;
+
+		/* Reservoir sampling: every line gets an equal chance in one pass. */
+		seen++;
+		if (rand() % seen == 0) snprintf(chosen, sizeof(chosen), "%s", line);
+	}
+	free(text);
+
+	if (!chosen[0]) {
+		fprintf(stderr, "netxm: playlist held no supported module\n");
+		return -3;
+	}
+
+	/* The listed mirror is usually unreachable; the main server is not. */
+	char direct[512];
+	const size_t mirror_len = strlen(MODLAND_MIRROR);
+	if (strncmp(chosen, MODLAND_MIRROR, mirror_len) == 0)
+		snprintf(direct, sizeof(direct), "%s%s", MODLAND_HOST, chosen + mirror_len);
+	else
+		snprintf(direct, sizeof(direct), "%s", chosen);
+
+	if (http_get(direct, &out->data, &out->len, MODULE_CAP) != 0 || !out->data || out->len == 0) {
+		free(out->data);
+		out->data = NULL;
+		fprintf(stderr, "netxm: module download failed\n");
+		return -4;
+	}
+
+	/* Name and format come from the path; Modland has no metadata to read.
+	   The folder above the file is the artist, which is worth showing. */
+	const char* slash = strrchr(direct, '/');
+	snprintf(out->filename, sizeof(out->filename), "%s", slash ? slash + 1 : direct);
+	url_decode(out->filename);
+	snprintf(out->title, sizeof(out->title), "%s", out->filename);
+	char* dot = strrchr(out->title, '.');
+	if (dot) *dot = 0;
+	extension_of(out->filename, out->format, sizeof(out->format));
+
+	if (slash) {
+		const char* start = direct;
+		for (const char* p = direct; p < slash; p++)
+			if (*p == '/') start = p + 1;
+		if (start < slash) {
+			size_t n = (size_t)(slash - start);
+			if (n >= sizeof(out->artist)) n = sizeof(out->artist) - 1;
+			memcpy(out->artist, start, n);
+			out->artist[n] = 0;
+			url_decode(out->artist);
+		}
+	}
+	snprintf(out->genre, sizeof(out->genre), "%s", "Modland");
+	return 0;
+}
+
 int netxm_fetch(const NetxmRequest* req, NetxmResult* out)
 {
 	char url_base[200];
@@ -463,6 +554,8 @@ int netxm_fetch(const NetxmRequest* req, NetxmResult* out)
 	case NETXM_TOPSCORE:
 		snprintf(url_base, sizeof(url_base), URL_CHART, "topscore");
 		return fetch_listing(url_base, 0, -1, out);
+	case NETXM_PLAYLIST:
+		return fetch_playlist(req, out);
 	default:
 		return -6;
 	}

@@ -18,13 +18,24 @@ enum NetxmKind {
 	NETXM_RANDOM = 0,
 	NETXM_GENRE = 1,
 	NETXM_FEATURED = 2,
-	NETXM_TOPSCORE = 3
+	NETXM_TOPSCORE = 3,
+	/* Modland: a playlist is a plain text file of absolute URLs, so one
+	   request gets the list and a second gets the module. No HTML to parse,
+	   which is why these are cheaper than the Mod Archive pages above. */
+	NETXM_PLAYLIST = 4
+};
+
+enum NetxmSource {
+	NETXM_MODARCHIVE = 0,
+	NETXM_MODLAND = 1
 };
 
 typedef struct {
 	int kind;             /* NetxmKind */
+	int source;           /* NetxmSource */
 	int genre_id;         /* NETXM_GENRE */
 	const char* format;   /* "MOD", "XM", "S3M", "IT" or NULL for any supported */
+	const char* playlist; /* NETXM_PLAYLIST: path below /pub/playlists/ */
 } NetxmRequest;
 
 typedef struct {

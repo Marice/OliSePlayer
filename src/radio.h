@@ -32,7 +32,9 @@ public:
 	/* Station selection (index into stations.h). */
 	void set_station(int index);
 	int station() const { return station_; }
-	Station station_info() const { return station_at(station_); }
+	int source() const { return source_; }
+	void set_source(int source);
+	Station station_info() const { return station_at_for(source_, station_); }
 
 	/* Start a download unless one is running. */
 	bool fetch();
@@ -61,6 +63,8 @@ private:
 	RadioTrack pending_;
 	int station_ = 0;
 	int job_station_ = 0;
+	int source_ = SOURCE_MODARCHIVE;
+	int job_source_ = SOURCE_MODARCHIVE;
 	char error_[128] = {0};
 	static constexpr int HISTORY_CAP = 20;
 	RadioTrack hist_[HISTORY_CAP];

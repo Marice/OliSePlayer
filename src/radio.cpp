@@ -25,10 +25,19 @@ bool Radio::available()
 #endif
 }
 
+void Radio::set_source(int source)
+{
+	if (source < 0 || source >= NUM_SOURCES) source = SOURCE_MODARCHIVE;
+	if (source == source_) return;
+	source_ = source;
+	station_ = 0;   /* station indices do not carry over between sources */
+}
+
 void Radio::set_station(int index)
 {
+	const int n = station_count_for(source_);
 	if (index < 0) index = 0;
-	if (index >= station_count()) index = station_count() - 1;
+	if (index >= n) index = n - 1;
 	station_ = index;
 }
 
@@ -47,12 +56,14 @@ static void clean_name(char* s)
 int Radio::worker(void* arg)
 {
 	Radio* self = (Radio*)arg;
-	Station st = station_at(self->job_station_);
+	Station st = station_at_for(self->job_source_, self->job_station_);
 	NetxmRequest req;
 	NetxmResult res;
 	req.kind = (int)st.kind;
+	req.source = self->job_source_;
 	req.genre_id = st.genre_id;
 	req.format = st.format;
+	req.playlist = st.playlist;
 
 	int rc = netxm_fetch(&req, &res);
 	if (rc != 0) {
@@ -100,6 +111,7 @@ bool Radio::fetch()
 	free(pending_.data);
 	pending_ = RadioTrack();
 	job_station_ = station_;
+	job_source_ = source_;
 	SDL_AtomicSet(&state_, (int)RadioState::Loading);
 	thread_ = SDL_CreateThread(worker, "radio", this);
 	if (!thread_) {
