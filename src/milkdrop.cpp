@@ -46,6 +46,8 @@ projectm_handle g_pm = nullptr;
 Entry* g_presets = nullptr;
 int g_count = 0;
 int g_current = -1;
+int* g_order = nullptr;   /* shuffled preset order */
+int g_order_pos = 0;
 bool g_ready = false;
 int g_screen_w = 0, g_screen_h = 0;
 
@@ -168,6 +170,28 @@ void read_index(const char* dir)
 	dbg_log("milkdrop: index %s: %d preset(s)", path, g_count);
 }
 
+/* Stepping walks a shuffled order rather than the alphabet: with hundreds of
+   presets a fixed sequence means the same neighbours every time, and sorted by
+   filename that is the same author over and over. The order is reshuffled once
+   it has been walked through, and the history keeps a preset from coming back
+   immediately after a reshuffle. */
+void reshuffle()
+{
+	for (int i = 0; i < g_count; i++) g_order[i] = i;
+	/* Fisher-Yates. */
+	for (int i = g_count - 1; i > 0; i--) {
+		const int j = rand() % (i + 1);
+		const int t = g_order[i];
+		g_order[i] = g_order[j];
+		g_order[j] = t;
+	}
+	/* Continue from wherever the current preset sits in the new order, so the
+	   next press does not repeat what is already on screen. */
+	g_order_pos = 0;
+	for (int i = 0; i < g_count; i++)
+		if (g_order[i] == g_current) { g_order_pos = i; break; }
+}
+
 void load(int index)
 {
 	if (!g_pm || index < 0 || index >= g_count) return;
@@ -205,11 +229,16 @@ bool init(int screen_w, int screen_h)
 		return false;
 	}
 
+	g_order = (int*)calloc((size_t)g_count, sizeof(int));
+	if (g_order) reshuffle();
+
 	g_pm = projectm_create();
 	if (!g_pm) {
 		dbg_log("milkdrop: projectm_create failed");
 		free(g_presets);
 		g_presets = nullptr;
+		free(g_order);
+		g_order = nullptr;
 		return false;
 	}
 
@@ -240,15 +269,24 @@ const char* current_name()
 void step(int delta)
 {
 	if (!g_ready || g_count == 0) return;
-	int next = (g_current + delta) % g_count;
-	if (next < 0) next += g_count;
-	load(next);
+	if (!g_order) { load((g_current + (delta > 0 ? 1 : g_count - 1)) % g_count); return; }
+
+	g_order_pos += delta > 0 ? 1 : -1;
+	if (g_order_pos >= g_count) { reshuffle(); g_order_pos = 0; }
+	else if (g_order_pos < 0) { reshuffle(); g_order_pos = g_count - 1; }
+	load(g_order[g_order_pos]);
 }
 
 void shuffle()
 {
 	if (!g_ready || g_count == 0) return;
-	load(rand() % g_count);
+	/* A jump to anywhere, and the walk continues from there. */
+	if (g_order) {
+		g_order_pos = rand() % g_count;
+		load(g_order[g_order_pos]);
+	} else {
+		load(rand() % g_count);
+	}
 }
 
 void add_audio(const int16_t* samples, int n)
@@ -270,6 +308,7 @@ void shutdown()
 {
 	if (g_pm) { projectm_destroy(g_pm); g_pm = nullptr; }
 	if (g_presets) { free(g_presets); g_presets = nullptr; }
+	if (g_order) { free(g_order); g_order = nullptr; }
 	g_count = 0;
 	g_current = -1;
 	g_ready = false;
