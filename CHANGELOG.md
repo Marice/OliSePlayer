@@ -14,11 +14,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compo. One request gets the list and a second gets the tune, where the Mod
   Archive route needs a page to be parsed first.
 
+- **Keep a track.** L2 + Circle writes the playing radio module into `music/`
+  and adds it to `index.txt`, so a tune that would otherwise scroll out of the
+  20 track history can be kept. It refuses to overwrite: the same title can
+  come round twice with different music behind it.
+- **Automatic preset change** every minute while the visualiser is on screen,
+  the way MilkDrop moves on by itself. L2 + Options turns it off. Picking a
+  preset by hand restarts the clock.
+
 ### Changed
 - Stepping through visualiser presets follows a shuffled order instead of the
   alphabet. Sorted by filename, stepping meant hearing out one author at a
   time; the order is reshuffled once it has been walked through. R2 + Triangle
   still jumps anywhere at once.
+- `main.cpp` was 715 lines and did input, rendering, radio logic and elevation
+  side by side. The track decisions moved to `track.cpp` and the buttons to
+  `input.cpp`, with the shared state in `app.h`; `main.cpp` is now 353 lines of
+  startup and frame loop.
 
 ## [02.000.001] - 2026-10-07
 

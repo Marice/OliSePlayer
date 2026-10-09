@@ -37,15 +37,17 @@ Press the touchpad for this list on screen.
 | L2 + Triangle | Previous preset (R2 + Triangle picks a random one) |
 | Cross | Pause / play |
 | Circle | Browse the local `music/` folder |
+| L2 + Circle | Keep the playing radio track in `music/` |
 | L1 / R1 | Previous / next local file (page up / down in lists) |
 | Options | Switch the right panel between instruments and scopes |
+| L2 + Options | Automatic preset change every minute, on or off |
 | Square | Visualiser: off, behind the interface, full screen |
 | R2 | CRT scanlines on / off |
 | D-pad left / right | Scroll through the channels |
 | D-pad up / down | Volume (hold L2 to jump through the song) |
 
 On the desktop build: `n` / `p` next and previous, `g` stations, space
-pause, `o` file list, `s` scopes, `f` effects, `c` CRT, `b` next preset,
+pause, `o` file list, `s` scopes, `f` effects, `c` CRT, `b` next preset, `k` keep this track,
 arrows for channels and volume, `h` help, Esc quits.
 
 ## The visualiser
