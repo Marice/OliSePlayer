@@ -32,7 +32,9 @@ void now_playing_card(const TrackInfo& ti, const char* source, const char* stati
 void toast(const char* line1, const char* line2, int alpha256);
 void file_browser(const Library& lib, int sel, int first);
 /* Station list: fixed stations followed by all genres. */
-void station_picker(int sel, int first, int current);
+void station_picker(int source, int sel, int first, int current);
+/* Which archive to listen to; shown before the station list. */
+void source_picker(int sel, int current);
 void help_overlay();
 void loading_badge(int frame);
 

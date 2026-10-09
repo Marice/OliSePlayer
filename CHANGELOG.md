@@ -6,6 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Modland as a second source.** Triangle now asks which archive to listen to
+  before it asks for a station. Modland is read through its playlists, which
+  are plain text files of direct links: the favourites of around 850 modules,
+  a chiptune selection, netlabel releases, a few musicdisks and a demoparty
+  compo. One request gets the list and a second gets the tune, where the Mod
+  Archive route needs a page to be parsed first.
+
+### Changed
+- Stepping through visualiser presets follows a shuffled order instead of the
+  alphabet. Sorted by filename, stepping meant hearing out one author at a
+  time; the order is reshuffled once it has been walked through. R2 + Triangle
+  still jumps anywhere at once.
+
 ## [02.000.001] - 2026-10-07
 
 ### Changed

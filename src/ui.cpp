@@ -276,22 +276,46 @@ void now_playing_card(const TrackInfo& ti, const char* source, const char* stati
 	}
 }
 
-void station_picker(int sel, int first, int current)
+/* The source picker: which archive to listen to. Deliberately short, because
+   the two archives are organised so differently that a single merged list of
+   stations would be misleading. */
+void source_picker(int sel, int current)
+{
+	int w = 480, h = 150;
+	int x = gfx::W / 2 - w / 2, y = 90;
+	gfx::dim(0, 0, gfx::W, gfx::H, 110);
+	gfx::bevel(x, y, w, h);
+	gfx::text(x + 8, y + 6, "CHOOSE A SOURCE", gfx::WHITE);
+	gfx::field(x + 6, y + 18, w - 12, h - 44);
+
+	for (int i = 0; i < NUM_SOURCES; i++) {
+		int ly = y + 26 + i * 26;
+		if (i == sel) gfx::fill(x + 8, ly - 3, w - 16, 22, gfx::HILITE);
+		gfx::text(x + 14, ly, SOURCES[i].name, i == current ? gfx::NOTE : gfx::TEXT);
+		gfx::text(x + 14, ly + 10, SOURCES[i].detail, gfx::TEXT_DIM);
+		if (i == current) gfx::text(x + w - 20 - gfx::text_width("*"), ly, "*", gfx::NOTE);
+	}
+	gfx::text(x + 10, y + h - 14, "CROSS: PICK   CIRCLE: BACK", gfx::TEXT_DIM);
+}
+
+void station_picker(int source, int sel, int first, int current)
 {
 	int w = 480, h = 232;
 	int x = gfx::W / 2 - w / 2, y = 64;
 	gfx::dim(0, 0, gfx::W, gfx::H, 110);
 	gfx::bevel(x, y, w, h);
-	gfx::text(x + 8, y + 6, "MOD ARCHIVE STATIONS", gfx::WHITE);
+	char title[48];
+	snprintf(title, sizeof(title), "%.30s STATIONS", SOURCES[source].name);
+	gfx::text(x + 8, y + 6, title, gfx::WHITE);
 	char hdr[32];
-	snprintf(hdr, sizeof(hdr), "%d/%d", sel + 1, station_count());
+	snprintf(hdr, sizeof(hdr), "%d/%d", sel + 1, station_count_for(source));
 	gfx::text(x + w - 8 - gfx::text_width(hdr), y + 6, hdr, gfx::TEXT_DIM);
 	gfx::field(x + 6, y + 18, w - 12, h - 44);
 	int lines = (h - 48) / 10;
-	for (int i = 0; i < lines && first + i < station_count(); i++) {
+	for (int i = 0; i < lines && first + i < station_count_for(source); i++) {
 		int idx = first + i;
 		int ly = y + 22 + i * 10;
-		Station st = station_at(idx);
+		Station st = station_at_for(source, idx);
 		if (idx == sel) gfx::fill(x + 8, ly - 1, w - 16, 10, gfx::HILITE);
 		bool genre = st.kind == STATION_GENRE;
 		if (genre && idx == NUM_FIXED_STATIONS) gfx::text(x + 14, ly, "GENRES:", gfx::TEXT_DIM);
@@ -351,7 +375,7 @@ void help_overlay()
 		"R3 ............ NEXT RANDOM TRACK (MOD ARCHIVE)",
 		"L3 ............ PREVIOUS TRACK",
 		"CROSS ......... PAUSE / PLAY",
-		"TRIANGLE ...... STATIONS  (VISUALISER: PRESET, L2 BACK)",
+		"TRIANGLE ...... SOURCE + STATION  (VISUALISER: PRESET)",
 		"CIRCLE ........ LOCAL FILE LIST",
 		"L1 / R1 ....... PREVIOUS / NEXT LOCAL FILE",
 		"OPTIONS ....... INSTRUMENTS <-> SCOPES",

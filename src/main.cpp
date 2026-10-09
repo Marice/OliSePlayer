@@ -80,6 +80,8 @@ struct App {
 	int browser_sel = 0, browser_first = 0;
 	bool picker = false;
 	int picker_sel = 0, picker_first = 0;
+	bool source_picker = false;   /* shown before the station list */
+	int source_sel = 0;
 	char detail_text[64] = "";
 	int ch_offset = 0;
 	int card_frames = 0;           /* now-playing card countdown */
@@ -242,17 +244,48 @@ static void tune_in(App& a, int index)
 
 static void handle_button(App& a, int b, bool& running)
 {
+	if (a.source_picker) {
+		switch (b) {
+		case BTN_DUP:   if (a.source_sel > 0) a.source_sel--; break;
+		case BTN_DDOWN: if (a.source_sel + 1 < NUM_SOURCES) a.source_sel++; break;
+		case BTN_CROSS:
+			/* Picking a source opens its stations: the two steps are one
+			   decision, so the user should not have to press Triangle again. */
+			a.radio.set_source(a.source_sel);
+			a.source_picker = false;
+			a.picker = true;
+			a.picker_sel = a.radio.station();
+			a.picker_first = 0;
+			break;
+		case BTN_CIRCLE:
+		case BTN_TRIANGLE:
+		case BTN_TOUCHPAD:
+			a.source_picker = false;
+			break;
+		}
+		return;
+	}
 	if (a.picker) {
 		switch (b) {
 		case BTN_DUP:   if (a.picker_sel > 0) a.picker_sel--; break;
-		case BTN_DDOWN: if (a.picker_sel + 1 < station_count()) a.picker_sel++; break;
+		case BTN_DDOWN: if (a.picker_sel + 1 < station_count_for(a.radio.source())) a.picker_sel++; break;
 		case BTN_L1:    a.picker_sel = a.picker_sel > 10 ? a.picker_sel - 10 : 0; break;
-		case BTN_R1:    a.picker_sel = a.picker_sel + 10 < station_count() ? a.picker_sel + 10 : station_count() - 1; break;
+		case BTN_R1: {
+			const int n = station_count_for(a.radio.source());
+			a.picker_sel = a.picker_sel + 10 < n ? a.picker_sel + 10 : n - 1;
+			break;
+		}
 		case BTN_CROSS:
 			tune_in(a, a.picker_sel);
 			a.picker = false;
 			break;
 		case BTN_CIRCLE:
+			/* Back to the source list rather than straight out: that is where
+			   this screen was opened from. */
+			a.picker = false;
+			a.source_picker = true;
+			a.source_sel = a.radio.source();
+			break;
 		case BTN_TRIANGLE:
 		case BTN_TOUCHPAD:
 			a.picker = false;
@@ -321,8 +354,8 @@ static void handle_button(App& a, int b, bool& running)
 			break;
 		}
 #endif
-		a.picker = true;
-		a.picker_sel = a.radio.station();
+		a.source_picker = true;
+		a.source_sel = a.radio.source();
 		break;
 	case BTN_OPTIONS:  a.show_scopes = !a.show_scopes; break;
 	case BTN_SQUARE:   cycle_look(a); break;
@@ -633,7 +666,8 @@ int main(int argc, char** argv)
 			a.toast_frames--;
 		}
 		if (a.browser) ui::file_browser(a.library, a.browser_sel, a.browser_first);
-		if (a.picker) ui::station_picker(a.picker_sel, a.picker_first, a.radio.station());
+		if (a.source_picker) ui::source_picker(a.source_sel, a.radio.source());
+		if (a.picker) ui::station_picker(a.radio.source(), a.picker_sel, a.picker_first, a.radio.station());
 		if (a.help) ui::help_overlay();
 
 		if (shot_path && a.frame == shot_frame) {

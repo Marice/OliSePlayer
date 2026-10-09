@@ -33,7 +33,7 @@ Press the touchpad for this list on screen.
 |---|---|
 | R3 | Next track |
 | L3 | Previous track |
-| Triangle | Choose a station, or the next preset while the visualiser runs |
+| Triangle | Choose a source and station, or the next preset while the visualiser runs |
 | L2 + Triangle | Previous preset (R2 + Triangle picks a random one) |
 | Cross | Pause / play |
 | Circle | Browse the local `music/` folder |
@@ -71,10 +71,20 @@ preset author who objects can have theirs removed; see
 
 ## Where the music comes from
 
-All tunes come from The Mod Archive. The player uses the normal website
-pages, the same ones you see in a browser, because the XML API needs a key.
-A genre station picks a random page from that genre and a random module on
-it. The featured and top rated stations pick from the current charts.
+Triangle asks which archive to listen to first, then which station within it.
+The two are kept apart because they are organised differently, and one merged
+list of genres would not be honest about where a tune comes from.
+
+**The Mod Archive** holds around 160.000 modules, sorted by genre. The player
+reads the normal website pages, the same ones a browser shows, because the XML
+API needs a key. A genre station picks a random page from that genre and a
+random module on it; featured and top rated pick from the current charts.
+
+**Modland** is the larger archive and is organised by format and artist. The
+player uses its playlists, which are plain text files of direct links: the
+favourites of some 850 modules, a chiptune selection, netlabel releases, and a
+few musicdisks and demoparty compos. One request gets the list, a second gets
+the tune, so it tends to be quicker than the Mod Archive route.
 
 A track plays once and then the next one from the same station starts. The
 last 20 tracks stay in memory, so L3 goes back without downloading again.
