@@ -21,7 +21,8 @@ int logo_width();
 int logo_height();
 
 /* Twisting ribbon with 3x chrome text on it. base_y is the ribbon centre. */
-void twister(const char* text, float scroll_x, int frame, int base_y, int level);
+/* fade 0..256 dims the whole ribbon, for handing over to a new line. */
+void twister(const char* text, float scroll_x, int frame, int base_y, int level, int fade = 256);
 int twister_text_width(const char* text);
 
 /* Copper bars inside y0..y1, pulsing with the music energy. */

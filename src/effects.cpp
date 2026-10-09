@@ -152,7 +152,7 @@ int twister_text_width(const char* text)
 	return (int)strlen(text) * TW_GLYPH;
 }
 
-void twister(const char* text, float scroll_x, int frame, int base_y, int level)
+void twister(const char* text, float scroll_x, int frame, int base_y, int level, int fade)
 {
 	int len = (int)strlen(text);
 	if (len == 0) return;
@@ -177,7 +177,8 @@ void twister(const char* text, float scroll_x, int frame, int base_y, int level)
 			if ((unsigned)y >= (unsigned)gfx::H) continue;
 			int edge = (y == ytop || y == ybot) ? 1 : 0;
 			uint32_t c = edge ? gfx::blend(band, gfx::WHITE, 90) : band;
-			gfx::fb[y * gfx::W + x] = gfx::blend(gfx::fb[y * gfx::W + x], c, edge ? 230 : 150);
+			const int mix = ((edge ? 230 : 150) * fade) >> 8;
+			gfx::fb[y * gfx::W + x] = gfx::blend(gfx::fb[y * gfx::W + x], c, mix);
 		}
 	}
 
@@ -185,7 +186,10 @@ void twister(const char* text, float scroll_x, int frame, int base_y, int level)
 	   Each glyph follows the ribbon centre at its own middle column, with a
 	   full black outline so it reads on any background. */
 	uint32_t rows[TW_GLYPH];
-	for (int r = 0; r < TW_GLYPH; r++) rows[r] = chrome_row(r);
+	/* The glyphs carry their own chrome colours, so fading them means fading
+	   the table they are drawn from; the outline follows because it is drawn
+	   from the same rows. */
+	for (int r = 0; r < TW_GLYPH; r++) rows[r] = gfx::shade(chrome_row(r), fade);
 	for (int ci = 0; ci < len; ci++) {
 		int gx = (int)floorf(scroll_x) + ci * TW_GLYPH;
 		if (gx + TW_GLYPH < 0 || gx >= gfx::W) continue;

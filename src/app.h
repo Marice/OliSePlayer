@@ -69,11 +69,36 @@ struct App {
 	int retry_delay = 10 * FPS;
 	bool l2_down = false, r2_down = false;
 	float scroll_x = gfx::W;
+	/* The scroller shows the greeting once, then what is playing. The text is
+	   built when a pass ends rather than every frame, because measuring it is
+	   the expensive part. */
+	/* Two different questions: has the greeting been put on the band, and has
+	   it finished its pass. Treating them as one cut the greeting short as
+	   soon as the first track arrived. */
+	bool scroller_greeting = false;   /* the greeting is the line on screen */
+	bool scroller_greeted = false;    /* its one pass has finished */
+	char scroller[512] = "";
+	bool scroller_stale = false;   /* a new track wants a new line */
+	/* 256 is fully visible. A new track fades the band out, swaps the text at
+	   zero and fades back in, so a line is never cut off mid sentence. The
+	   greeting is exempt: it runs its one pass whatever starts playing. */
+	int scroller_fade = 256;
+	int scroller_fade_dir = 0;     /* -1 fading out, +1 fading in, 0 steady */
 	Uint32 row_change_ms = 0;
 	int last_row = -1, last_pos = -1;
 	int frame = 0;
 	char appdir[512] = "";
 };
+
+/* The scroller greeting, shown once at startup. */
+static const char GREETINGS[] =
+	"      *** OLISE PLAYER ***   TRACKER RADIO FOR THE PLAYSTATION 5 ... "
+	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE AND MODLAND ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
+	"GREETINGS TO ALL TRACKER MUSICIANS AND THE PS5 HOMEBREW SCENE ... "
+	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ...      ";
+
+/* Fills a.scroller with what is playing, or the greeting the first time. */
+void build_scroller_text(App& a);
 
 /* Two lines in the corner for four seconds. */
 void show_toast(App& a, const char* l1, const char* l2);
