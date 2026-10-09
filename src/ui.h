@@ -36,7 +36,8 @@ void station_picker(int source, int sel, int first, int current);
 /* Which archive to listen to; shown before the station list. */
 void source_picker(int sel, int current);
 void help_overlay();
-void loading_badge(int frame);
+/* "DOWNLOADING FROM ..." with the name of the source in use. */
+void loading_badge(int frame, int source);
 
 } /* namespace ui */
 

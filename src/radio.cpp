@@ -83,6 +83,7 @@ int Radio::worker(void* arg)
 	t.len = res.len;
 	t.module_id = res.module_id;
 	t.station = self->job_station_;
+	t.source = self->job_source_;
 	/* Prefer the title stored inside the module, then the site's title. */
 	clean_name(name);
 	strncpy(t.title, name[0] ? name : res.title, sizeof(t.title) - 1);

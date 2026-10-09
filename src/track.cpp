@@ -17,6 +17,10 @@ static void on_track_started(App& a)
 	a.card_frames = 6 * FPS;
 	a.ch_offset = 0;
 	a.last_row = -1;
+	/* The scroller is rebuilt at the end of its pass rather than here: cutting
+	   a line off halfway reads worse than showing the previous track for a few
+	   seconds longer. The now playing card covers the gap. */
+	a.scroller_stale = true;
 	fx::warp();
 	fprintf(stderr, "NOW PLAYING: %s [%s] %d ch (%s)\n", a.player.info().title, a.player.info().type,
 	        a.player.info().channels, a.source_text);
@@ -44,11 +48,20 @@ static bool play_radio_track(App& a, const RadioTrack& t)
 		return false;
 	}
 	a.source = Source::Radio;
-	snprintf(a.source_text, sizeof(a.source_text), "MOD ARCHIVE #%ld", t.module_id);
-	if (t.genre[0] && t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s BY %s", t.module_id, t.genre, t.artist);
-	else if (t.genre[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s", t.module_id, t.genre);
-	else if (t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld BY %s", t.module_id, t.artist);
-	else snprintf(a.detail_text, sizeof(a.detail_text), "MOD ARCHIVE #%ld (%s)", t.module_id, t.format);
+	/* Modland has no module numbers: its tracks are files in an archive, so
+	   the name of the source is all there is to show. The Mod Archive numbers
+	   every module and that number is what a listener looks one up by. */
+	if (t.module_id > 0)
+		snprintf(a.source_text, sizeof(a.source_text), "%.20s #%ld", source_name(t.source), t.module_id);
+	else
+		snprintf(a.source_text, sizeof(a.source_text), "%.30s", source_name(t.source));
+
+	char id[24] = "";
+	if (t.module_id > 0) snprintf(id, sizeof(id), "#%ld ", t.module_id);
+	if (t.genre[0] && t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "%s%s BY %s", id, t.genre, t.artist);
+	else if (t.genre[0]) snprintf(a.detail_text, sizeof(a.detail_text), "%s%s", id, t.genre);
+	else if (t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "%sBY %s", id, t.artist);
+	else snprintf(a.detail_text, sizeof(a.detail_text), "%s%.20s (%s)", id, source_name(t.source), t.format);
 	for (char* q = a.detail_text; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
 	on_track_started(a);
 	return true;
@@ -200,4 +213,68 @@ bool keep_current_track(App& a)
 	dbg_log("keep: %s (%zu bytes)", path, t->len);
 	show_toast(a, "KEPT IN music/", name);
 	return true;
+}
+
+/* What the scroller says. The greeting runs once at startup, because that is
+   the moment it is worth reading; after that the band is better used for what
+   is playing, which the pattern view and the small panels cannot spell out at
+   this size.
+
+   libxmp reports the tracker that wrote a module, its channel count and how
+   many instruments and patterns it holds. For a demoscene player those are
+   the interesting numbers, so they go in. */
+void build_scroller_text(App& a)
+{
+	a.scroller_stale = false;
+	if (!a.scroller_greeted && !a.scroller_greeting) {
+		/* Only marks the greeting as showing; the main loop sets greeted once
+		   the line has actually run off the screen. */
+		a.scroller_greeting = true;
+		snprintf(a.scroller, sizeof(a.scroller), "%s", GREETINGS);
+		return;
+	}
+	a.scroller_greeting = false;
+
+	const TrackInfo& t = a.player.info();
+	if (!t.loaded) {
+		/* Nothing playing: say so rather than scrolling an empty band. */
+		snprintf(a.scroller, sizeof(a.scroller),
+		         "      *** OLISE PLAYER ***   PRESS R3 FOR A RANDOM TRACK, "
+		         "TRIANGLE TO PICK A SOURCE AND STATION, CIRCLE FOR LOCAL FILES ...      ");
+		return;
+	}
+
+	char extra[160] = "";
+	int n = 0;
+	if (t.channels > 0)
+		n += snprintf(extra + n, sizeof(extra) - n, "%d CHANNELS", t.channels);
+	if (t.instruments > 0 && n < (int)sizeof(extra) - 24)
+		n += snprintf(extra + n, sizeof(extra) - n, "%s%d INSTRUMENTS", n ? " - " : "", t.instruments);
+	if (t.patterns > 0 && n < (int)sizeof(extra) - 20)
+		n += snprintf(extra + n, sizeof(extra) - n, "%s%d PATTERNS", n ? " - " : "", t.patterns);
+	if (t.total_time_ms > 0 && n < (int)sizeof(extra) - 14) {
+		const int secs = t.total_time_ms / 1000;
+		snprintf(extra + n, sizeof(extra) - n, "%s%d:%02d", n ? " - " : "", secs / 60, secs % 60);
+	}
+
+	/* Sections are joined one at a time so an empty one leaves no dangling
+	   separator, and the genre/artist line is skipped when it only repeats the
+	   source, which is what Modland's own metadata amounts to. */
+	const char* parts[5];
+	int count = 0;
+	parts[count++] = t.title[0] ? t.title : "UNTITLED";
+	parts[count++] = a.source_text[0] ? a.source_text : "LOCAL FILE";
+	if (t.type[0]) parts[count++] = t.type;
+	if (extra[0]) parts[count++] = extra;
+	if (a.detail_text[0] && strstr(a.detail_text, a.source_text) == NULL)
+		parts[count++] = a.detail_text;
+
+	int n2 = snprintf(a.scroller, sizeof(a.scroller), "      NOW PLAYING: ");
+	for (int i = 0; i < count && n2 < (int)sizeof(a.scroller) - 32; i++)
+		n2 += snprintf(a.scroller + n2, sizeof(a.scroller) - n2, "%s%.80s",
+		               i ? "   ***   " : "", parts[i]);
+	snprintf(a.scroller + n2, sizeof(a.scroller) - n2, " ...      ");
+
+	for (char* p = a.scroller; *p; p++)
+		if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
 }

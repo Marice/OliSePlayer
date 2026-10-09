@@ -35,6 +35,13 @@ static const NetSource SOURCES[] = {
 };
 static const int NUM_SOURCES = (int)(sizeof(SOURCES) / sizeof(SOURCES[0]));
 
+/* The name to put in front of the user: "THE MOD ARCHIVE" or "MODLAND". */
+static inline const char* source_name(int source)
+{
+	if (source < 0 || source >= NUM_SOURCES) source = SOURCE_MODARCHIVE;
+	return SOURCES[source].name;
+}
+
 struct Station {
 	StationKind kind;
 	int genre_id;          /* STATION_GENRE only */

@@ -1,4 +1,4 @@
-/* Mod Archive radio: background downloads, stations and a history. */
+/* Radio: background downloads from an archive, stations and a history. */
 #ifndef RADIO_H
 #define RADIO_H
 
@@ -18,6 +18,7 @@ struct RadioTrack {
 	char genre[48] = {0};    /* when the site told us */
 	char artist[48] = {0};
 	int station = 0;         /* station index it was fetched with */
+	int source = 0;          /* NetxmSource it came from */
 };
 
 enum class RadioState { Idle, Loading, Ready, Failed };
@@ -45,7 +46,7 @@ public:
 	const char* error() const { return error_; }
 	void ack_failed();
 
-	/* History of played Mod Archive tracks; remember() takes ownership. */
+	/* History of played radio tracks; remember() takes ownership. */
 	void remember(RadioTrack& t);
 	bool has_prev() const { return idx_ > 0; }
 	bool has_next() const { return idx_ + 1 < hist_n_; }

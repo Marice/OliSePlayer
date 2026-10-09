@@ -174,7 +174,7 @@ void info_panel(const TrackInfo& ti, const Snapshot& s, const char* detail, int 
 	char buf[64], t1[16], t2[16];
 	if (!ti.loaded) {
 		gfx::text(tx, ty, "NO MODULE", gfx::TEXT_DIM);
-		gfx::text(tx, ty + 10, "R3: RANDOM TRACK FROM THE MOD ARCHIVE", gfx::TEXT);
+		gfx::text(tx, ty + 10, "R3: NEXT RANDOM TRACK", gfx::TEXT);
 		gfx::text(tx, ty + 20, "SQUARE: VISUALISER   TRIANGLE: GENRES", gfx::TEXT);
 		gfx::text(tx, ty + 30, "CIRCLE: LOCAL FILES", gfx::TEXT);
 		return;
@@ -244,7 +244,7 @@ void scope_panel(const int16_t* samples, int n, const Snapshot& s)
 
 void copyright_line(int y)
 {
-	const char* l = "(C) 2026 OLISE PLAYER - TRACKER RADIO FOR PS5 - MUSIC BY THE MOD ARCHIVE";
+	const char* l = "(C) 2026 OLISE PLAYER - TRACKER RADIO FOR PS5 - MUSIC BY THE MOD ARCHIVE AND MODLAND";
 	gfx::text_outlined(gfx::W / 2 - gfx::text_width(l) / 2, y, l, gfx::ROWNUM);
 }
 
@@ -372,7 +372,7 @@ void file_browser(const Library& lib, int sel, int first)
 void help_overlay()
 {
 	static const char* lines[] = {
-		"R3 ............ NEXT RANDOM TRACK (MOD ARCHIVE)",
+		"R3 ............ NEXT RANDOM TRACK FROM THE STATION",
 		"L3 ............ PREVIOUS TRACK",
 		"CROSS ......... PAUSE / PLAY",
 		"TRIANGLE ...... SOURCE + STATION  (VISUALISER: PRESET)",
@@ -395,11 +395,11 @@ void help_overlay()
 	for (int i = 0; i < n; i++) gfx::text(x + 10, y + 22 + i * 10, lines[i], gfx::TEXT);
 }
 
-void loading_badge(int frame)
+void loading_badge(int frame, int source)
 {
 	static const char spin[4] = { '|', '/', '-', '\\' };
 	char buf[40];
-	snprintf(buf, sizeof(buf), "%c DOWNLOADING FROM THE MOD ARCHIVE", spin[(frame / 6) & 3]);
+	snprintf(buf, sizeof(buf), "%c DOWNLOADING FROM %.20s", spin[(frame / 6) & 3], source_name(source));
 	int w = gfx::text_width(buf) + 12;
 	int x = gfx::W / 2 - w / 2, y = PATTERN_Y - 20;
 	gfx::fill(x, y, w, 14, gfx::PANEL_DEEP);

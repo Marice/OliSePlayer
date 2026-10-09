@@ -34,11 +34,6 @@
 #include "stations.h"
 #include "ui.h"
 
-static const char GREETINGS[] =
-	"      *** OLISE PLAYER ***   TRACKER RADIO FOR THE PLAYSTATION 5 ... "
-	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE AND MODLAND ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
-	"GREETINGS TO ALL TRACKER MUSICIANS AND THE PS5 HOMEBREW SCENE ... "
-	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ...      ";
 
 void show_toast(App& a, const char* l1, const char* l2)
 {
@@ -276,11 +271,39 @@ int main(int argc, char** argv)
 		/* Version, small, to the right of the logo at its baseline. */
 		gfx::text_outlined(gfx::W / 2 + fx::logo_width() / 2 + 6, 50 + fx::logo_height() / 2 - 12, "V" OLISE_VERSION, gfx::TEXT_DIM);
 		if (a.fx_level > 0) {
-			char text[512];
-			snprintf(text, sizeof(text), "%s", GREETINGS);
-			fx::twister(text, a.scroll_x, a.frame, 118, a.fx_level);
+			if (!a.scroller[0]) build_scroller_text(a);
+
+			/* A new track asks for a new line, but the greeting is never cut
+			   short: it runs its single pass whatever starts playing. */
+			if (a.scroller_stale && !a.scroller_greeting && a.scroller_fade_dir == 0)
+				a.scroller_fade_dir = -1;
+
+			if (a.scroller_fade_dir < 0) {
+				a.scroller_fade -= 12;
+				if (a.scroller_fade <= 0) {
+					a.scroller_fade = 0;
+					build_scroller_text(a);
+					a.scroll_x = gfx::W;
+					a.scroller_fade_dir = 1;
+				}
+			} else if (a.scroller_fade_dir > 0) {
+				a.scroller_fade += 12;
+				if (a.scroller_fade >= 256) {
+					a.scroller_fade = 256;
+					a.scroller_fade_dir = 0;
+				}
+			}
+
+			fx::twister(a.scroller, a.scroll_x, a.frame, 118, a.fx_level, a.scroller_fade);
 			a.scroll_x -= a.fx_level > 1 ? 2.2f : 1.6f;
-			if (a.scroll_x < -fx::twister_text_width(text)) a.scroll_x = gfx::W;
+			if (a.scroll_x < -fx::twister_text_width(a.scroller)) {
+				/* The line ran off the screen. Only here is the greeting
+				   really done, which is what lets a track that arrived
+				   halfway through wait for it. */
+				if (a.scroller_greeting) a.scroller_greeted = true;
+				build_scroller_text(a);
+				a.scroll_x = gfx::W;
+			}
 		} else {
 			ui::copyright_line(114);
 		}
@@ -299,7 +322,7 @@ int main(int argc, char** argv)
 		if (a.ch_offset < 0) a.ch_offset = 0;
 		} /* draw_ui */
 
-		if (a.radio.state() == RadioState::Loading) ui::loading_badge(a.frame);
+		if (a.radio.state() == RadioState::Loading) ui::loading_badge(a.frame, a.radio.source());
 		if (a.card_frames > 0) {
 			int alpha = a.card_frames > 5 * FPS + 50 ? (6 * FPS - a.card_frames) * 256 / 10 : (a.card_frames < 20 ? a.card_frames * 256 / 20 : 256);
 			char station[48] = "";
