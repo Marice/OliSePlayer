@@ -26,6 +26,7 @@
 #include "milkdrop.h"
 #endif
 #endif
+#include "app.h"
 #include "gfx.h"
 #include "library.h"
 #include "player.h"
@@ -33,383 +34,20 @@
 #include "stations.h"
 #include "ui.h"
 
-/* DualSense button indices as SDL reports them. */
-#define BTN_CROSS     0
-#define BTN_CIRCLE    1
-#define BTN_SQUARE    2
-#define BTN_TRIANGLE  3
-#define BTN_TOUCHPAD  4
-#define BTN_OPTIONS   6
-#define BTN_L3        7
-#define BTN_R3        8
-#define BTN_L1        9
-#define BTN_R1        10
-#define BTN_DUP       11
-#define BTN_DDOWN     12
-#define BTN_DLEFT     13
-#define BTN_DRIGHT    14
-#define AXIS_L2       4
-#define AXIS_R2       5
-
-#define FPS 60
-
 static const char GREETINGS[] =
 	"      *** OLISE PLAYER ***   TRACKER RADIO FOR THE PLAYSTATION 5 ... "
-	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
+	"RANDOM MODULES STRAIGHT FROM THE MOD ARCHIVE AND MODLAND ... PRESS R3 FOR THE NEXT TRACK, L3 TO GO BACK ... "
 	"GREETINGS TO ALL TRACKER MUSICIANS AND THE PS5 HOMEBREW SCENE ... "
 	"OLIVIER <3 - ELISE <3 - CAROLIEN <3 ... MADE BY MARICE IN 2026 ...      ";
 
-enum class Source { None, Local, Radio };
-
-struct App {
-	Player player;
-	Radio radio;
-	Library library;
-	Snapshot snap;
-
-	Source source = Source::None;
-	char source_text[48] = "NO SOURCE";
-	bool radio_mode = true;        /* auto-next on track end */
-	int fx_level = 2;              /* 2 full, 1 calm, 0 off */
-	int vis_mode = 0;              /* 0 off, 1 behind the interface, 2 full screen */
-	int vis_preset = 0;
-	bool crt = false;
-	bool show_scopes = false;
-	bool help = false;
-	bool browser = false;
-	int browser_sel = 0, browser_first = 0;
-	bool picker = false;
-	int picker_sel = 0, picker_first = 0;
-	bool source_picker = false;   /* shown before the station list */
-	int source_sel = 0;
-	char detail_text[64] = "";
-	int ch_offset = 0;
-	int card_frames = 0;           /* now-playing card countdown */
-	int toast_frames = 0;
-	char toast1[64] = "", toast2[64] = "";
-	int retry_frames = 0;          /* radio backoff */
-	int retry_delay = 10 * FPS;
-	bool l2_down = false, r2_down = false;
-	float scroll_x = gfx::W;
-	Uint32 row_change_ms = 0;
-	int last_row = -1, last_pos = -1;
-	int frame = 0;
-	char appdir[512] = "";
-};
-
-static void show_toast(App& a, const char* l1, const char* l2)
+void show_toast(App& a, const char* l1, const char* l2)
 {
 	strncpy(a.toast1, l1, sizeof(a.toast1) - 1);
 	strncpy(a.toast2, l2 ? l2 : "", sizeof(a.toast2) - 1);
 	a.toast_frames = 4 * FPS;
 }
 
-/* One button for the whole look. Square walks through the demo effects and
-   then the visualiser, so everything that changes how busy the screen is sits
-   on a single key instead of a chord. Without OpenGL the visualiser steps are
-   skipped, which leaves the three effect levels this app always had. */
-static void cycle_look(App& a)
-{
-#ifdef OLISE_GL
-	/* Square is the visualiser button: off, behind the interface, full screen.
-	   The demo effects keep their own level, so the scroller and the starfield
-	   are not disturbed by looking for the visualiser. */
-	if (display_has_gpu()) {
-		a.vis_mode = (a.vis_mode + 1) % 3;
-		if (a.vis_mode == 0) show_toast(a, "VISUALISER", "OFF");
-		else show_toast(a, a.vis_mode == 1 ? "VISUALISER" : "VISUALISER FULL",
-		                vis::preset_name(a.vis_preset));
-		return;
-	}
-#endif
-	/* Without OpenGL there is no visualiser, so the button keeps its old job. */
-	a.fx_level = (a.fx_level + 2) % 3;
-	show_toast(a, "EFFECTS", a.fx_level == 2 ? "FULL" : (a.fx_level == 1 ? "CALM" : "OFF"));
-}
 
-static void on_track_started(App& a)
-{
-	a.card_frames = 6 * FPS;
-	a.ch_offset = 0;
-	a.last_row = -1;
-	fx::warp();
-	fprintf(stderr, "NOW PLAYING: %s [%s] %d ch (%s)\n", a.player.info().title, a.player.info().type,
-	        a.player.info().channels, a.source_text);
-}
-
-static bool play_local(App& a, int index)
-{
-	if (index < 0 || index >= a.library.count()) return false;
-	a.library.set_current(index);
-	if (!a.player.load_file(a.library.path(index), a.radio_mode ? 1 : 0)) {
-		show_toast(a, "COULD NOT LOAD FILE", a.library.name(index));
-		return false;
-	}
-	a.source = Source::Local;
-	snprintf(a.source_text, sizeof(a.source_text), "LOCAL %d/%d", index + 1, a.library.count());
-	snprintf(a.detail_text, sizeof(a.detail_text), "LOCAL FILE: %.40s", a.library.name(index));
-	on_track_started(a);
-	return true;
-}
-
-static bool play_radio_track(App& a, const RadioTrack& t)
-{
-	if (!a.player.load_memory(t.data, t.len, 1)) {
-		show_toast(a, "MODULE FAILED TO LOAD", t.title);
-		return false;
-	}
-	a.source = Source::Radio;
-	snprintf(a.source_text, sizeof(a.source_text), "MOD ARCHIVE #%ld", t.module_id);
-	if (t.genre[0] && t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s BY %s", t.module_id, t.genre, t.artist);
-	else if (t.genre[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld %s", t.module_id, t.genre);
-	else if (t.artist[0]) snprintf(a.detail_text, sizeof(a.detail_text), "#%ld BY %s", t.module_id, t.artist);
-	else snprintf(a.detail_text, sizeof(a.detail_text), "MOD ARCHIVE #%ld (%s)", t.module_id, t.format);
-	for (char* q = a.detail_text; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
-	on_track_started(a);
-	return true;
-}
-
-static void start_radio_fetch(App& a)
-{
-	if (a.radio.state() == RadioState::Loading) return;
-	if (!a.radio.fetch()) {
-		show_toast(a, "RADIO UNAVAILABLE", a.radio.error());
-		a.radio.ack_failed();
-	}
-}
-
-static void next_track(App& a)
-{
-	if (a.radio.has_next()) {
-		const RadioTrack* t = a.radio.next();
-		if (t) play_radio_track(a, *t);
-		return;
-	}
-	start_radio_fetch(a);
-}
-
-static void prev_track(App& a)
-{
-	if (a.radio.has_prev()) {
-		const RadioTrack* t = a.radio.prev();
-		if (t) play_radio_track(a, *t);
-	} else if (a.source == Source::Local && a.library.count() > 0) {
-		play_local(a, a.library.prev());
-	} else {
-		show_toast(a, "NO PREVIOUS TRACK", nullptr);
-	}
-}
-
-static void poll_radio(App& a)
-{
-	RadioState st = a.radio.state();
-	if (st == RadioState::Ready) {
-		RadioTrack t;
-		if (a.radio.take(t)) {
-			if (play_radio_track(a, t)) {
-				a.radio.remember(t);
-				a.retry_delay = 10 * FPS;
-			} else {
-				free(t.data);
-			}
-		}
-	} else if (st == RadioState::Failed) {
-		fprintf(stderr, "radio: %s\n", a.radio.error());
-		a.radio.ack_failed();
-		char l2[64];
-		snprintf(l2, sizeof(l2), "RETRY IN %d S", a.retry_delay / FPS);
-		show_toast(a, a.radio.error(), l2);
-		a.retry_frames = a.retry_delay;
-		if (a.retry_delay < 60 * FPS) a.retry_delay *= 2;
-		/* Keep the music going with a local file while offline. */
-		if (!a.player.info().loaded && a.library.count() > 0) play_local(a, a.library.current());
-	}
-	if (a.retry_frames > 0 && --a.retry_frames == 0 && a.radio_mode && a.source != Source::Local) {
-		start_radio_fetch(a);
-	}
-}
-
-static void tune_in(App& a, int index)
-{
-	a.radio.set_station(index);
-	Station st = a.radio.station_info();
-	char name[48];
-	snprintf(name, sizeof(name), "%.40s", st.name);
-	for (char* q = name; *q; q++) if (*q >= 'a' && *q <= 'z') *q = (char)(*q - 32);
-	show_toast(a, "TUNING IN", name);
-	a.radio_mode = true;
-	a.retry_frames = 0;
-	start_radio_fetch(a);
-}
-
-static void handle_button(App& a, int b, bool& running)
-{
-	if (a.source_picker) {
-		switch (b) {
-		case BTN_DUP:   if (a.source_sel > 0) a.source_sel--; break;
-		case BTN_DDOWN: if (a.source_sel + 1 < NUM_SOURCES) a.source_sel++; break;
-		case BTN_CROSS:
-			/* Picking a source opens its stations: the two steps are one
-			   decision, so the user should not have to press Triangle again. */
-			a.radio.set_source(a.source_sel);
-			a.source_picker = false;
-			a.picker = true;
-			a.picker_sel = a.radio.station();
-			a.picker_first = 0;
-			break;
-		case BTN_CIRCLE:
-		case BTN_TRIANGLE:
-		case BTN_TOUCHPAD:
-			a.source_picker = false;
-			break;
-		}
-		return;
-	}
-	if (a.picker) {
-		switch (b) {
-		case BTN_DUP:   if (a.picker_sel > 0) a.picker_sel--; break;
-		case BTN_DDOWN: if (a.picker_sel + 1 < station_count_for(a.radio.source())) a.picker_sel++; break;
-		case BTN_L1:    a.picker_sel = a.picker_sel > 10 ? a.picker_sel - 10 : 0; break;
-		case BTN_R1: {
-			const int n = station_count_for(a.radio.source());
-			a.picker_sel = a.picker_sel + 10 < n ? a.picker_sel + 10 : n - 1;
-			break;
-		}
-		case BTN_CROSS:
-			tune_in(a, a.picker_sel);
-			a.picker = false;
-			break;
-		case BTN_CIRCLE:
-			/* Back to the source list rather than straight out: that is where
-			   this screen was opened from. */
-			a.picker = false;
-			a.source_picker = true;
-			a.source_sel = a.radio.source();
-			break;
-		case BTN_TRIANGLE:
-		case BTN_TOUCHPAD:
-			a.picker = false;
-			break;
-		}
-		int lines = 18;
-		if (a.picker_sel < a.picker_first) a.picker_first = a.picker_sel;
-		if (a.picker_sel >= a.picker_first + lines) a.picker_first = a.picker_sel - lines + 1;
-		return;
-	}
-	if (a.browser) {
-		switch (b) {
-		case BTN_DUP:   if (a.browser_sel > 0) a.browser_sel--; break;
-		case BTN_DDOWN: if (a.browser_sel + 1 < a.library.count()) a.browser_sel++; break;
-		case BTN_CROSS:
-			if (play_local(a, a.browser_sel)) a.browser = false;
-			break;
-		case BTN_CIRCLE:
-		case BTN_TOUCHPAD:
-			a.browser = false;
-			break;
-		}
-		int lines = 18;
-		if (a.browser_sel < a.browser_first) a.browser_first = a.browser_sel;
-		if (a.browser_sel >= a.browser_first + lines) a.browser_first = a.browser_sel - lines + 1;
-		return;
-	}
-	if (a.help) {
-		a.help = false;
-		return;
-	}
-	switch (b) {
-	case BTN_R3:       next_track(a); break;
-	case BTN_L3:       prev_track(a); break;
-	case BTN_CROSS:    a.player.set_paused(!a.player.paused()); break;
-	case BTN_CIRCLE:
-		a.library.scan(a.appdir);
-		a.browser = true;
-		a.browser_sel = a.library.current();
-		break;
-	case BTN_L1:       if (a.library.count()) play_local(a, a.library.prev()); break;
-	case BTN_R1:       if (a.library.count()) play_local(a, a.library.next()); break;
-	case BTN_TRIANGLE:
-#ifdef OLISE_GL
-		/* While the visualiser is on, Triangle picks the next preset: that is
-		   what the user is looking at, so that is what the button acts on.
-		   With the visualiser off it opens the genre picker as it always did. */
-		if (a.vis_mode > 0) {
-			/* Held with L2, Triangle jumps back instead of forward: with
-			   hundreds of presets, stepping past the one you wanted is
-			   otherwise a very long way round. */
-			const int delta = a.l2_down ? -1 : 1;
-#ifdef OLISE_PROJECTM
-			if (milkdrop::available()) {
-				/* With hundreds of presets, stepping is for browsing and R2
-				   is for getting somewhere else entirely. */
-				if (a.r2_down) milkdrop::shuffle();
-				else milkdrop::step(delta);
-				show_toast(a, "PRESET", milkdrop::current_name());
-				break;
-			}
-#endif
-			const int n = vis::preset_count();
-			a.vis_preset = (a.vis_preset + (delta > 0 ? 1 : n - 1)) % n;
-			show_toast(a, "PRESET", vis::preset_name(a.vis_preset));
-			break;
-		}
-#endif
-		a.source_picker = true;
-		a.source_sel = a.radio.source();
-		break;
-	case BTN_OPTIONS:  a.show_scopes = !a.show_scopes; break;
-	case BTN_SQUARE:   cycle_look(a); break;
-	case BTN_DLEFT:    if (a.ch_offset > 0) a.ch_offset--; break;
-	case BTN_DRIGHT:   a.ch_offset++; break;
-	case BTN_DUP:
-		if (a.l2_down) a.player.seek_positions(1);
-		else a.player.set_volume(a.player.volume() + 5);
-		break;
-	case BTN_DDOWN:
-		if (a.l2_down) a.player.seek_positions(-1);
-		else a.player.set_volume(a.player.volume() - 5);
-		break;
-	case BTN_TOUCHPAD: a.help = true; break;
-	default:
-		fprintf(stderr, "input: unmapped joystick button %d\n", b);
-		break;
-	}
-	(void)running;
-}
-
-static void handle_key(App& a, SDL_Keycode k, bool& running)
-{
-	switch (k) {
-	case SDLK_ESCAPE: running = false; break;
-	case SDLK_n:      handle_button(a, BTN_R3, running); break;
-	case SDLK_p:      handle_button(a, BTN_L3, running); break;
-	case SDLK_SPACE:  handle_button(a, BTN_CROSS, running); break;
-	case SDLK_o:      handle_button(a, BTN_CIRCLE, running); break;
-	case SDLK_COMMA:  handle_button(a, BTN_L1, running); break;
-	case SDLK_PERIOD: handle_button(a, BTN_R1, running); break;
-	case SDLK_s:      handle_button(a, BTN_OPTIONS, running); break;
-	case SDLK_g:      handle_button(a, BTN_TRIANGLE, running); break;
-	case SDLK_f:      handle_button(a, BTN_SQUARE, running); break;
-	case SDLK_c:      a.crt = !a.crt; break;
-#ifdef OLISE_GL
-	case SDLK_b:
-		a.vis_preset = (a.vis_preset + 1) % vis::preset_count();
-		show_toast(a, "PRESET", vis::preset_name(a.vis_preset));
-		break;
-#endif
-	case SDLK_LEFT:   handle_button(a, BTN_DLEFT, running); break;
-	case SDLK_RIGHT:  handle_button(a, BTN_DRIGHT, running); break;
-	case SDLK_UP:     handle_button(a, BTN_DUP, running); break;
-	case SDLK_DOWN:   handle_button(a, BTN_DDOWN, running); break;
-	case SDLK_RETURN:
-		if (a.browser || a.picker) handle_button(a, BTN_CROSS, running);
-		else a.card_frames = 6 * FPS;
-		break;
-	case SDLK_h:      handle_button(a, BTN_TOUCHPAD, running); break;
-	}
-}
-
-/* Directory of the executable, so music/ next to eboot.elf is found. */
 static void app_dir(const char* argv0, char* out, size_t n)
 {
 	out[0] = 0;
@@ -618,6 +256,18 @@ int main(int argc, char** argv)
 		/* In full visualiser mode the player is not drawn at all: only the
 		   toasts and the now playing card go over the effect, and the black
 		   around them is keyed out by the backend. */
+#if defined(OLISE_GL) && defined(OLISE_PROJECTM)
+		/* A preset every minute, the way MilkDrop moves on by itself. The
+		   timer only runs while the visualiser is on screen, so it does not
+		   quietly walk through the list in the background. */
+		if (a.vis_mode > 0 && a.vis_auto_seconds > 0 && milkdrop::available()) {
+			if (--a.vis_auto_frames <= 0) {
+				a.vis_auto_frames = a.vis_auto_seconds * FPS;
+				milkdrop::step(1);
+			}
+		}
+#endif
+
 		const bool draw_ui = a.vis_mode != 2;
 		if (draw_ui) {
 		fx::stars_update(energy);
