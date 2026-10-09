@@ -6,7 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [02.001.000] - 2026-10-09
+
 ### Added
+- **The scroller says what is playing.** The greeting runs its one pass at
+  startup, and from then on the band carries the track: title, source, the
+  tracker that wrote it, channels, instruments, patterns, running time, and
+  the genre and artist where the archive gave them. A new track fades the band
+  out, swaps the line and fades it back in, so nothing is cut off mid
+  sentence. A track arriving during the greeting waits for it to finish.
 - **Modland as a second source.** Triangle now asks which archive to listen to
   before it asks for a station. Modland is read through its playlists, which
   are plain text files of direct links: the favourites of around 850 modules,
@@ -76,6 +84,13 @@ presets.
   path from `argv[0]`, which a native title does not provide.
 - Square only drives the visualiser now; the demo effects keep their level
   instead of cycling along with it.
+
+### Fixed
+- The interface named The Mod Archive everywhere, including while downloading
+  from Modland. The source is now carried on the track, so the download
+  notice, the now playing line and the help text all say where the music
+  actually came from. Modland tracks no longer show a module number, because
+  that archive does not have them.
 
 ### Fixed
 - Local modules in `music/` were never found on the console.
