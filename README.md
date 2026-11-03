@@ -1,3 +1,5 @@
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/H5L629ZHNX)
+
 # OliSe Player
 
 Tracker music radio for the PS5, in FastTracker II style.
